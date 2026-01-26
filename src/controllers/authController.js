@@ -2,8 +2,26 @@ const db = require('../config/database');
 const transporter = require('../config/mailer');
 const crypto = require('crypto');
 
+/**
+ * FUNÇÃO DE AUTO-REPARO: 
+ * Garante que a coluna cpf_cnpj existe no banco de dados.
+ */
+const verificarTabela = async () => {
+  try {
+    await db.query(`
+      ALTER TABLE public.produtores 
+      ADD COLUMN IF NOT EXISTS cpf_cnpj VARCHAR(20);
+    `);
+    console.log("✅ Banco de dados: Coluna cpf_cnpj verificada/criada.");
+  } catch (err) {
+    console.error("⚠️ Aviso: Falha ao verificar estrutura do banco:", err.message);
+  }
+};
+verificarTabela();
+
 // --- REGISTRO ---
 exports.registerProdutor = async (req, res) => {
+  console.log("--- 📝 Iniciando registro ---");
   try {
     const { 
       email, nome, cpf_cnpj, tipo, telefone, data_nascimento, 
@@ -29,19 +47,30 @@ exports.registerProdutor = async (req, res) => {
     ];
     
     await db.query(query, values);
+    console.log(`✅ Usuário inserido no banco: ${email}`);
 
-    // Envio de E-mail
-    await transporter.sendMail({
-      from: `"Linkah" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: '🚀 Sua Senha Linkah',
-      html: `<h2>Olá, ${nome}!</h2><p>Sua senha de acesso é: <b>${senhaGerada}</b></p>`
+    // Tentativa de envio de e-mail (não trava o registro se falhar)
+    try {
+      await transporter.sendMail({
+        from: `"Linkah" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: '🚀 Sua Senha Linkah',
+        html: `<h2>Olá, ${nome}!</h2><p>Sua senha de acesso é: <b>${senhaGerada}</b></p>`
+      });
+      console.log("📧 E-mail de boas-vindas enviado!");
+    } catch (mailErr) {
+      console.error("❌ ERRO NO MOTOR DE EMAIL (Ignorado):", mailErr.message);
+      // O registro continua mesmo se o e-mail falhar
+    }
+
+    return res.status(201).json({ 
+        message: "Sucesso!", 
+        temp_senha: senhaGerada // Enviamos a senha no JSON caso o e-mail falhe
     });
 
-    return res.status(201).json({ message: "Sucesso!" });
   } catch (err) {
-    console.error("Erro no registro:", err);
-    return res.status(500).json({ message: "Erro no cadastro" });
+    console.error("❌ Erro no registro:", err);
+    return res.status(500).json({ message: "Erro no cadastro. Verifique se o e-mail já existe." });
   }
 };
 
@@ -81,7 +110,7 @@ exports.login = async (req, res) => {
 
 // --- BUSCAR PERFIL (GET) ---
 exports.getPerfil = async (req, res) => {
-  const { email } = req.query; // Pega o email da query string
+  const { email } = req.query;
   console.log(`--- 🔍 Buscando perfil: ${email} ---`);
   
   try {
