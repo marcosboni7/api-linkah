@@ -15,7 +15,6 @@ const inicializarBanco = async () => {
   try {
     console.log('⏳ Sincronizando tabelas com o código JavaScript...');
 
-    // 1. TABELA DE PRODUTORES
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.produtores (
         email VARCHAR(255) PRIMARY KEY,
@@ -37,10 +36,7 @@ const inicializarBanco = async () => {
         foto_perfil TEXT,
         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
 
-    // 2. TABELA DE EVENTOS
-    await db.query(`
       CREATE TABLE IF NOT EXISTS public.eventos (
         id SERIAL PRIMARY KEY,
         produtor_email VARCHAR(255) REFERENCES public.produtores(email) ON DELETE CASCADE,
@@ -64,10 +60,7 @@ const inicializarBanco = async () => {
         imagem_capa TEXT,
         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
 
-    // 3. TABELA DE INGRESSOS
-    await db.query(`
       CREATE TABLE IF NOT EXISTS public.ingressos (
         id SERIAL PRIMARY KEY,
         evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE,
@@ -83,8 +76,13 @@ const inicializarBanco = async () => {
   }
 };
 
-// --- MIDDLEWARES ---
-app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'] }));
+// --- MIDDLEWARES (AJUSTADO PARA FUNCIONAR NA VERCEL) ---
+app.use(cors({
+  origin: '*', // Permite qualquer origem
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // OPTIONS é importante para o navegador
+  allowedHeaders: ['Content-Type', 'Authorization'] // Garante que esses cabeçalhos passem
+}));
+
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ limit: '15mb', extended: true }));
