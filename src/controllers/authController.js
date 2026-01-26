@@ -3,25 +3,46 @@ const transporter = require('../config/mailer');
 const crypto = require('crypto');
 
 /**
- * FUNÇÃO DE AUTO-REPARO: 
- * Garante que a coluna cpf_cnpj existe no banco de dados.
+ * 🛠️ AUTO-REPARO DO BANCO DE DADOS
+ * Este bloco verifica e cria todas as colunas necessárias na tabela 'produtores'.
+ * Isso evita os erros de "coluna não existe" no Render.
  */
-const verificarTabela = async () => {
+const sincronizarBanco = async () => {
   try {
-    await db.query(`
-      ALTER TABLE public.produtores 
-      ADD COLUMN IF NOT EXISTS cpf_cnpj VARCHAR(20);
-    `);
-    console.log("✅ Banco de dados: Coluna cpf_cnpj verificada/criada.");
+    const colunas = [
+      'cpf_cnpj VARCHAR(20)',
+      'tipo VARCHAR(50)',
+      'telefone VARCHAR(20)',
+      'data_nascimento VARCHAR(20)',
+      'cep VARCHAR(10)',
+      'rua VARCHAR(255)',
+      'numero VARCHAR(20)',
+      'bairro VARCHAR(100)',
+      'estado VARCHAR(50)',
+      'instagram VARCHAR(100)',
+      'facebook VARCHAR(100)',
+      'descricao TEXT',
+      'razao_social VARCHAR(255)',
+      'senha VARCHAR(255)'
+    ];
+
+    for (const col of colunas) {
+      const [nomeColuna] = col.split(' ');
+      await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS ${col}`);
+    }
+    
+    console.log("✅ Estrutura completa pronta para uso!");
   } catch (err) {
-    console.error("⚠️ Aviso: Falha ao verificar estrutura do banco:", err.message);
+    console.error("⚠️ Erro ao sincronizar colunas:", err.message);
   }
 };
-verificarTabela();
+
+// Executa a sincronização ao iniciar o arquivo
+sincronizarBanco();
 
 // --- REGISTRO ---
 exports.registerProdutor = async (req, res) => {
-  console.log("--- 📝 Iniciando registro ---");
+  console.log("--- 📝 Iniciando registro de novo produtor ---");
   try {
     const { 
       email, nome, cpf_cnpj, tipo, telefone, data_nascimento, 
@@ -29,6 +50,7 @@ exports.registerProdutor = async (req, res) => {
       descricao, razao_social 
     } = req.body;
 
+    // Gera uma senha aleatória de 8 caracteres
     const senhaGerada = crypto.randomBytes(4).toString('hex');
 
     const query = `
@@ -47,30 +69,37 @@ exports.registerProdutor = async (req, res) => {
     ];
     
     await db.query(query, values);
-    console.log(`✅ Usuário inserido no banco: ${email}`);
+    console.log(`✅ Usuário ${email} salvo com sucesso!`);
 
-    // Tentativa de envio de e-mail (não trava o registro se falhar)
+    // Tentativa de envio de e-mail (com try/catch isolado para não travar o registro)
     try {
       await transporter.sendMail({
         from: `"Linkah" <${process.env.EMAIL_USER}>`,
         to: email,
         subject: '🚀 Sua Senha Linkah',
-        html: `<h2>Olá, ${nome}!</h2><p>Sua senha de acesso é: <b>${senhaGerada}</b></p>`
+        html: `
+          <div style="font-family: sans-serif; color: #333;">
+            <h2>Olá, ${nome}!</h2>
+            <p>Seu cadastro na Linkah foi realizado com sucesso.</p>
+            <p>Sua senha de acesso temporária é: <strong style="color: #C22973; font-size: 20px;">${senhaGerada}</strong></p>
+            <p>Recomendamos alterar sua senha após o primeiro login.</p>
+          </div>
+        `
       });
       console.log("📧 E-mail de boas-vindas enviado!");
     } catch (mailErr) {
       console.error("❌ ERRO NO MOTOR DE EMAIL (Ignorado):", mailErr.message);
-      // O registro continua mesmo se o e-mail falhar
+      // O processo continua mesmo que o e-mail falhe
     }
 
     return res.status(201).json({ 
-        message: "Sucesso!", 
-        temp_senha: senhaGerada // Enviamos a senha no JSON caso o e-mail falhe
+      message: "Sucesso!", 
+      temp_senha: senhaGerada // Retornamos a senha para garantir o acesso caso o e-mail falhe
     });
 
   } catch (err) {
     console.error("❌ Erro no registro:", err);
-    return res.status(500).json({ message: "Erro no cadastro. Verifique se o e-mail já existe." });
+    return res.status(500).json({ message: "Erro ao realizar cadastro no banco de dados." });
   }
 };
 
@@ -89,7 +118,7 @@ exports.login = async (req, res) => {
 
     const usuario = result.rows[0];
 
-    // Comparação simples de senha
+    // Comparação de senha (removendo espaços extras)
     if (String(usuario.senha).trim() !== String(senha).trim()) {
       return res.status(401).json({ message: "Senha incorreta" });
     }
@@ -104,19 +133,17 @@ exports.login = async (req, res) => {
     });
   } catch (err) {
     console.error("Erro interno no login:", err);
-    return res.status(500).json({ message: "Erro interno" });
+    return res.status(500).json({ message: "Erro interno no servidor." });
   }
 };
 
 // --- BUSCAR PERFIL (GET) ---
 exports.getPerfil = async (req, res) => {
   const { email } = req.query;
-  console.log(`--- 🔍 Buscando perfil: ${email} ---`);
-  
   try {
     const query = `
-      SELECT nome, email, cpf_cnpj, telefone, cep, rua, numero, bairro, estado, 
-             instagram, facebook, descricao, razao_social
+      SELECT nome, email, cpf_cnpj, tipo, telefone, data_nascimento, cep, rua, numero, 
+             bairro, estado, instagram, facebook, descricao, razao_social
       FROM public.produtores 
       WHERE email = $1
     `;
@@ -129,13 +156,12 @@ exports.getPerfil = async (req, res) => {
     return res.status(200).json({ user: result.rows[0] });
   } catch (err) {
     console.error("Erro ao buscar perfil:", err);
-    return res.status(500).json({ message: "Erro no servidor ao buscar dados" });
+    return res.status(500).json({ message: "Erro ao buscar dados do perfil." });
   }
 };
 
 // --- ATUALIZAR PERFIL (PUT) ---
 exports.updatePerfil = async (req, res) => {
-  console.log("--- 📝 Atualizando perfil ---");
   try {
     const { 
       email, nome, cpf_cnpj, telefone, cep, rua, numero, bairro, 
@@ -154,11 +180,9 @@ exports.updatePerfil = async (req, res) => {
     ];
 
     await db.query(query, values);
-    
-    console.log(`✅ Perfil atualizado com sucesso: ${email}`);
     return res.status(200).json({ message: "Dados atualizados com sucesso!" });
   } catch (err) {
     console.error("Erro ao atualizar perfil:", err);
-    return res.status(500).json({ message: "Erro ao atualizar dados" });
+    return res.status(500).json({ message: "Erro ao atualizar dados." });
   }
 };
