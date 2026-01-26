@@ -2,69 +2,65 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const fs = require('fs');
-const path = require('path');
 const authRoutes = require('./routes/authRoutes');
 const eventoRoutes = require('./routes/eventoRoutes'); 
 const db = require('./config/database'); 
 
 const app = express();
 
-// --- SCRIPT DE INICIALIZAÇÃO DO BANCO (BACKUP) ---
+// --- CRIAÇÃO DAS TABELAS SEM DEPENDER DE ARQUIVO EXTERNO ---
 const inicializarBanco = async () => {
   try {
-    // AJUSTE AQUI: '../' sobe uma pasta para achar o arquivo na raiz do projeto
-    const sqlPath = path.join(__dirname, '../backup_linkah.sql');
+    console.log('⏳ Verificando estrutura do banco no Render...');
     
-    console.log(`🔍 Procurando arquivo em: ${sqlPath}`);
+    // Tabela de Produtores
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS produtores (
+        id SERIAL PRIMARY KEY,
+        nome VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        senha VARCHAR(255) NOT NULL,
+        foto_perfil TEXT,
+        data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
 
-    if (fs.existsSync(sqlPath)) {
-      console.log('⏳ Executando backup_linkah.sql no banco...');
-      const sql = fs.readFileSync(sqlPath, 'utf8');
-      
-      // Executa o conteúdo do seu SQL
-      await db.query(sql); 
-      
-      console.log('🚀 Tabelas e dados do backup carregados com sucesso!');
-    } else {
-      console.log('⚠️ Arquivo backup_linkah.sql não encontrado na raiz. Pulando inicialização.');
-    }
+    // Tabela de Eventos (ajustada para o que vi no seu dump)
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS eventos (
+        id SERIAL PRIMARY KEY,
+        produtor_email VARCHAR(255) REFERENCES produtores(email) ON DELETE CASCADE,
+        nome VARCHAR(255) NOT NULL,
+        categoria VARCHAR(100),
+        status VARCHAR(50) DEFAULT 'Ativo',
+        descricao TEXT,
+        thumbnail_url TEXT,
+        data_inicio DATE,
+        hora_inicio TIME,
+        local_nome VARCHAR(255),
+        endereco VARCHAR(255),
+        data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    console.log('✅ Banco de dados pronto para uso!');
   } catch (err) {
-    // Tratamento para evitar que o erro de "tabela já existe" pare o servidor
-    if (err.message.includes('already exists')) {
-      console.log('ℹ️ As tabelas já existem no banco. Tudo pronto!');
-    } else {
-      console.error('❌ Erro ao rodar backup SQL:', err.message);
-    }
+    console.error('⚠️ Erro na inicialização:', err.message);
   }
 };
 
-// --- CONFIGURAÇÃO DO CORS ---
-app.use(cors({
-  origin: '*', 
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
-app.use(helmet({
-  contentSecurityPolicy: false, // Facilita testes iniciais com imagens externas
-}));
-
+app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'] }));
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-// Rotas
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 
-// Teste de conexão
 app.get('/ping', (req, res) => res.send('pong'));
 
 const PORT = process.env.PORT || 3001;
-
 app.listen(PORT, async () => {
   console.log(`🚀 Linkah rodando na porta: ${PORT}`);
-  
-  // Roda o script assim que o servidor subir
   await inicializarBanco();
 });
