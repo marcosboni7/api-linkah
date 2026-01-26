@@ -2,20 +2,20 @@ const nodemailer = require('nodemailer');
 
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
-  port: 465,
-  secure: true, 
+  port: 587,
+  secure: false, // Use false para a porta 587
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS, // Senha de 16 dígitos do Google
+    pass: process.env.EMAIL_PASS,
   },
+  tls: {
+    rejectUnauthorized: false // Ajuda a evitar erros de certificado no Render
+  }
 });
 
-transporter.verify((error, success) => {
-  if (error) {
-    console.log("❌ ERRO NO MOTOR DE EMAIL:", error.message);
-  } else {
-    console.log("📧 ✅ MOTOR DE EMAIL PRONTO PARA DISPARAR!");
-  }
+// O verify pode demorar, então vamos deixar ele não-bloqueante
+transporter.verify().catch(error => {
+  console.log("❌ ERRO NO MOTOR DE EMAIL:", error.message);
 });
 
 module.exports = transporter;
