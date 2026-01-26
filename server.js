@@ -8,10 +8,10 @@ const db = require('./config/database');
 
 const app = express();
 
-// --- FUNÇÃO PARA CRIAR ESTRUTURA COMPLETA DO BANCO ---
+// --- FUNÇÃO PARA CRIAR TODAS AS TABELAS AUTOMATICAMENTE ---
 const inicializarBanco = async () => {
   try {
-    console.log('⏳ Sincronizando tabelas com o código JavaScript...');
+    console.log('⏳ Verificando e criando tabelas no banco de dados...');
 
     // 1. TABELA DE PRODUTORES (Campos exatos do authController.js)
     await db.query(`
@@ -37,7 +37,7 @@ const inicializarBanco = async () => {
       );
     `);
 
-    // 2. TABELA DE EVENTOS (Campos para Presencial, Online e Dashboard)
+    // 2. TABELA DE EVENTOS (Unificada para Presencial e Online)
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.eventos (
         id SERIAL PRIMARY KEY,
@@ -45,9 +45,9 @@ const inicializarBanco = async () => {
         nome VARCHAR(255) NOT NULL,
         categoria VARCHAR(100) DEFAULT 'Geral',
         status VARCHAR(50) DEFAULT 'Ativo',
-        tipo VARCHAR(50), -- 'Presencial' ou 'Online'
+        tipo VARCHAR(50), 
         descricao TEXT,
-        link_transmissao TEXT, -- Usado pelo OnlineController
+        link_transmissao TEXT, 
         data_inicio DATE,
         hora_inicio TIME,
         data_termino DATE,
@@ -64,29 +64,40 @@ const inicializarBanco = async () => {
       );
     `);
 
-    console.log('✅ Estrutura completa (Produtores e Eventos) pronta para uso!');
+    // 3. TABELA DE INGRESSOS (Para o funcionamento do salvarIngressos)
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS public.ingressos (
+        id SERIAL PRIMARY KEY,
+        evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE,
+        nome VARCHAR(255) NOT NULL,
+        preco DECIMAL(10,2) DEFAULT 0.00,
+        quantidade INTEGER DEFAULT 0
+      );
+    `);
+
+    console.log('✅ Estrutura do banco de dados pronta!');
   } catch (err) {
-    console.error('❌ ERRO NA CRIAÇÃO DAS TABELAS:', err.message);
+    console.error('❌ ERRO NA INICIALIZAÇÃO DO BANCO:', err.message);
   }
 };
 
 // --- MIDDLEWARES ---
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'] }));
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ limit: '15mb', extended: true }));
 
 // --- ROTAS ---
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 
-// Rota de teste para ver se o backend está vivo
+// Rota de teste
 app.get('/ping', (req, res) => res.send('pong'));
 
-// --- INICIALIZAÇÃO DO SERVIDOR ---
+// --- INICIALIZAÇÃO ---
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, async () => {
-  console.log(`🚀 Back-end Linkah rodando na porta: ${PORT}`);
-  // Roda a verificação de tabelas sempre que o servidor ligar
+  console.log(`🚀 Servidor Linkah rodando na porta: ${PORT}`);
+  // Executa a criação das tabelas ao ligar o server
   await inicializarBanco();
 });
