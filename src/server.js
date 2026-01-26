@@ -8,12 +8,12 @@ const db = require('./config/database');
 
 const app = express();
 
-// --- FUNÇÃO PARA CRIAR TODAS AS TABELAS (ESTRUTURA COMPLETA) ---
+// --- FUNÇÃO PARA CRIAR ESTRUTURA COMPLETA DO BANCO ---
 const inicializarBanco = async () => {
   try {
-    console.log('⏳ Sincronizando estrutura do banco Linkah...');
+    console.log('⏳ Sincronizando tabelas com o código JavaScript...');
 
-    // 1. TABELA DE PRODUTORES (Baseada no teu authController)
+    // 1. TABELA DE PRODUTORES (Campos exatos do authController.js)
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.produtores (
         email VARCHAR(255) PRIMARY KEY,
@@ -37,7 +37,7 @@ const inicializarBanco = async () => {
       );
     `);
 
-    // 2. TABELA DE EVENTOS (Unificando Presencial + Online + Dashboard)
+    // 2. TABELA DE EVENTOS (Campos para Presencial, Online e Dashboard)
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.eventos (
         id SERIAL PRIMARY KEY,
@@ -47,12 +47,12 @@ const inicializarBanco = async () => {
         status VARCHAR(50) DEFAULT 'Ativo',
         tipo VARCHAR(50), -- 'Presencial' ou 'Online'
         descricao TEXT,
-        link_transmissao TEXT, -- Exclusivo para Online
+        link_transmissao TEXT, -- Usado pelo OnlineController
         data_inicio DATE,
         hora_inicio TIME,
         data_termino DATE,
         hora_termino TIME,
-        local_nome VARCHAR(255), -- Para Presencial
+        local_nome VARCHAR(255),
         cep VARCHAR(20),
         endereco VARCHAR(255),
         numero VARCHAR(20),
@@ -64,9 +64,9 @@ const inicializarBanco = async () => {
       );
     `);
 
-    console.log('✅ Todas as tabelas foram verificadas e estão prontas!');
+    console.log('✅ Estrutura completa (Produtores e Eventos) pronta para uso!');
   } catch (err) {
-    console.error('❌ ERRO AO CRIAR TABELAS:', err.message);
+    console.error('❌ ERRO NA CRIAÇÃO DAS TABELAS:', err.message);
   }
 };
 
@@ -80,13 +80,13 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 
-// Rota de teste
+// Rota de teste para ver se o backend está vivo
 app.get('/ping', (req, res) => res.send('pong'));
 
-// --- INICIALIZAÇÃO ---
+// --- INICIALIZAÇÃO DO SERVIDOR ---
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, async () => {
-  console.log(`🚀 Servidor Linkah rodando na porta: ${PORT}`);
-  // Executa a criação das tabelas assim que o servidor liga
+  console.log(`🚀 Back-end Linkah rodando na porta: ${PORT}`);
+  // Roda a verificação de tabelas sempre que o servidor ligar
   await inicializarBanco();
 });
