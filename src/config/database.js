@@ -1,31 +1,37 @@
 const { Pool } = require('pg');
 const path = require('path');
 
+// Carrega o .env apenas para desenvolvimento local
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 
-console.log('--- Verificação de Variáveis ---');
-console.log('DB_HOST:', process.env.DB_HOST || '❌ NÃO ENCONTRADO');
-console.log('-------------------------------');
+console.log('--- 🔄 Iniciando Conexão com o Banco ---');
+
+// O segredo está aqui: Se existir DATABASE_URL (no Render existe), ele usa ela. 
+// Caso contrário, usa as variáveis soltas (local).
+const isProduction = process.env.DATABASE_URL;
 
 const pool = new Pool({
-  user: String(process.env.DB_USER || 'postgres'),
-  host: String(process.env.DB_HOST || 'localhost'),
-  database: String(process.env.DB_DATABASE || 'linkah_db'),
-  password: String(process.env.DB_PASSWORD || 'admin'),
-  port: Number(process.env.DB_PORT) || 5432,
-  // ADICIONE ISSO AQUI:
-  ssl: process.env.DB_HOST && process.env.DB_HOST !== 'localhost' 
+  connectionString: isProduction ? process.env.DATABASE_URL : null,
+  // Fallback para local caso não exista DATABASE_URL
+  user: !isProduction ? String(process.env.DB_USER || 'postgres') : undefined,
+  host: !isProduction ? String(process.env.DB_HOST || 'localhost') : undefined,
+  database: !isProduction ? String(process.env.DB_DATABASE || 'linkah_db') : undefined,
+  password: !isProduction ? String(process.env.DB_PASSWORD || 'admin') : undefined,
+  port: !isProduction ? Number(process.env.DB_PORT || 5432) : undefined,
+  
+  // CONFIGURAÇÃO OBRIGATÓRIA PARA O RENDER
+  ssl: isProduction 
     ? { rejectUnauthorized: false } 
     : false
 });
 
-// Teste de conexão
-pool.connect((err, client, release) => {
+// Teste de conexão melhorado
+pool.query('SELECT NOW()', (err, res) => {
   if (err) {
-    console.error('❌ ERRO CRÍTICO NO POSTGRES:', err.stack); // stack dá mais detalhes que message
+    console.error('❌ ERRO CRÍTICO NO POSTGRES:', err.message);
+    console.log('Verifique se a DATABASE_URL no Render está correta.');
   } else {
-    console.log('🐘 BANCO DE DADOS CONECTADO COM SUCESSO!');
-    release();
+    console.log('🐘 BANCO DE DADOS CONECTADO COM SUCESSO! Hora do banco:', res.rows[0].now);
   }
 });
 
