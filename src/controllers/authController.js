@@ -4,7 +4,6 @@ const crypto = require('crypto');
 
 /**
  * 🛠️ AUTO-REPARO DO BANCO DE DADOS
- * Garante que todas as colunas existam para evitar erros de "column does not exist".
  */
 const sincronizarBanco = async () => {
   try {
@@ -28,7 +27,7 @@ const sincronizarBanco = async () => {
     for (const col of colunas) {
       await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS ${col}`);
     }
-    console.log("✅ Estrutura completa pronta para uso!");
+    console.log("✅ Banco de Dados: Estrutura sincronizada!");
   } catch (err) {
     console.error("⚠️ Erro ao sincronizar colunas:", err.message);
   }
@@ -63,63 +62,73 @@ exports.registerProdutor = async (req, res) => {
       descricao, razao_social
     ];
     
-    // 1. Salva no Banco (Obrigatório e prioritário)
+    // 1. Salva no Banco (Prioridade Máxima)
     await db.query(query, values);
-    console.log(`✅ Usuário ${email} salvo com sucesso!`);
+    console.log(`✅ Usuário ${email} salvo no banco com sucesso!`);
 
-    // 2. Envio de e-mail (SEM 'AWAIT' PARA NÃO TRAVAR A TELA)
+    // 2. Envio de e-mail (Background com logs detalhados)
+    console.log(`📧 Tentando disparar e-mail para: ${email}...`);
     transporter.sendMail({
       from: `"Linkah" <${process.env.EMAIL_USER}>`,
       to: email,
       subject: '🚀 Sua Senha Linkah',
       html: `
-        <div style="font-family: sans-serif;">
-          <h2>Olá, ${nome}!</h2>
-          <p>Sua senha de acesso é: <strong style="color: #C22973;">${senhaGerada}</strong></p>
+        <div style="font-family: sans-serif; color: #333; padding: 20px; border: 1px solid #eee;">
+          <h2 style="color: #C22973;">Olá, ${nome}!</h2>
+          <p>Seu cadastro na Linkah foi concluído.</p>
+          <p>Sua senha de acesso é: <strong style="background: #f4f4f4; padding: 5px 10px;">${senhaGerada}</strong></p>
+          <hr>
+          <small>Se você não solicitou este cadastro, ignore este e-mail.</small>
         </div>
       `
-    }).then(() => {
-      console.log("📧 E-mail enviado em segundo plano!");
+    }).then((info) => {
+      console.log("✅ E-mail entregue com sucesso! Resposta:", info.response);
     }).catch(mailErr => {
-      console.error("❌ Falha no envio do e-mail (background):", mailErr.message);
+      console.error("❌ ERRO NO ENVIO DE E-MAIL:");
+      console.error("- Mensagem:", mailErr.message);
+      console.error("- Código:", mailErr.code);
+      console.error("- SMTP Response:", mailErr.response);
     });
 
-    // 3. Responde ao frontend IMEDIATAMENTE
+    // 3. Resposta imediata para o usuário não ficar esperando
     return res.status(201).json({ 
       message: "Sucesso!", 
       temp_senha: senhaGerada 
     });
 
   } catch (err) {
-    console.error("❌ Erro no registro:", err);
+    console.error("❌ Erro fatal no registro:", err);
     return res.status(500).json({ message: "Erro ao realizar cadastro no banco." });
   }
 };
 
 // --- LOGIN ---
 exports.login = async (req, res) => {
-  console.log("--- 🔐 Tentativa de login ---");
+  console.log(`--- 🔐 Tentativa de login: ${req.body.email} ---`);
   try {
     const { email, senha } = req.body;
     const query = 'SELECT * FROM public.produtores WHERE email = $1';
     const result = await db.query(query, [email]);
 
     if (result.rows.length === 0) {
+      console.log("❌ Login falhou: Usuário não encontrado.");
       return res.status(401).json({ message: "Usuário não encontrado" });
     }
 
     const usuario = result.rows[0];
 
     if (String(usuario.senha).trim() !== String(senha).trim()) {
+      console.log("❌ Login falhou: Senha incorreta.");
       return res.status(401).json({ message: "Senha incorreta" });
     }
 
+    console.log(`✅ Login realizado com sucesso: ${usuario.nome}`);
     return res.status(200).json({ 
       message: "Sucesso",
       user: { nome: usuario.nome, email: usuario.email } 
     });
   } catch (err) {
-    console.error("Erro interno no login:", err);
+    console.error("❌ Erro interno no login:", err);
     return res.status(500).json({ message: "Erro interno no servidor." });
   }
 };
@@ -138,6 +147,7 @@ exports.getPerfil = async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ message: "Perfil não encontrado" });
     return res.status(200).json({ user: result.rows[0] });
   } catch (err) {
+    console.error("Erro ao buscar perfil:", err);
     return res.status(500).json({ message: "Erro ao buscar perfil." });
   }
 };
@@ -153,8 +163,10 @@ exports.updatePerfil = async (req, res) => {
       WHERE email = $11
     `;
     await db.query(query, [nome, cpf_cnpj, telefone, cep, rua, numero, bairro, instagram, facebook, descricao, email]);
+    console.log(`✅ Perfil atualizado: ${email}`);
     return res.status(200).json({ message: "Dados atualizados com sucesso!" });
   } catch (err) {
+    console.error("Erro ao atualizar perfil:", err);
     return res.status(500).json({ message: "Erro ao atualizar dados." });
   }
 };
