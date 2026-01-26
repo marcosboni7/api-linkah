@@ -8,59 +8,85 @@ const db = require('./config/database');
 
 const app = express();
 
-// --- CRIAÇÃO DAS TABELAS SEM DEPENDER DE ARQUIVO EXTERNO ---
+// --- FUNÇÃO PARA CRIAR TODAS AS TABELAS (ESTRUTURA COMPLETA) ---
 const inicializarBanco = async () => {
   try {
-    console.log('⏳ Verificando estrutura do banco no Render...');
-    
-    // Tabela de Produtores
+    console.log('⏳ Sincronizando estrutura do banco Linkah...');
+
+    // 1. TABELA DE PRODUTORES (Baseada no teu authController)
     await db.query(`
-      CREATE TABLE IF NOT EXISTS produtores (
-        id SERIAL PRIMARY KEY,
+      CREATE TABLE IF NOT EXISTS public.produtores (
+        email VARCHAR(255) PRIMARY KEY,
         nome VARCHAR(255) NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL,
         senha VARCHAR(255) NOT NULL,
+        cpf_cnpj VARCHAR(20),
+        tipo VARCHAR(50),
+        telefone VARCHAR(20),
+        data_nascimento DATE,
+        cep VARCHAR(20),
+        rua VARCHAR(255),
+        numero VARCHAR(20),
+        bairro VARCHAR(100),
+        estado VARCHAR(50),
+        instagram VARCHAR(255),
+        facebook VARCHAR(255),
+        descricao TEXT,
+        razao_social VARCHAR(255),
         foto_perfil TEXT,
         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
-    // Tabela de Eventos (ajustada para o que vi no seu dump)
+    // 2. TABELA DE EVENTOS (Unificando Presencial + Online + Dashboard)
     await db.query(`
-      CREATE TABLE IF NOT EXISTS eventos (
+      CREATE TABLE IF NOT EXISTS public.eventos (
         id SERIAL PRIMARY KEY,
-        produtor_email VARCHAR(255) REFERENCES produtores(email) ON DELETE CASCADE,
+        produtor_email VARCHAR(255) REFERENCES public.produtores(email) ON DELETE CASCADE,
         nome VARCHAR(255) NOT NULL,
-        categoria VARCHAR(100),
+        categoria VARCHAR(100) DEFAULT 'Geral',
         status VARCHAR(50) DEFAULT 'Ativo',
+        tipo VARCHAR(50), -- 'Presencial' ou 'Online'
         descricao TEXT,
-        thumbnail_url TEXT,
+        link_transmissao TEXT, -- Exclusivo para Online
         data_inicio DATE,
         hora_inicio TIME,
-        local_nome VARCHAR(255),
+        data_termino DATE,
+        hora_termino TIME,
+        local_nome VARCHAR(255), -- Para Presencial
+        cep VARCHAR(20),
         endereco VARCHAR(255),
+        numero VARCHAR(20),
+        complemento VARCHAR(255),
+        cidade VARCHAR(100),
+        estado VARCHAR(50),
+        imagem_capa TEXT,
         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
-    console.log('✅ Banco de dados pronto para uso!');
+    console.log('✅ Todas as tabelas foram verificadas e estão prontas!');
   } catch (err) {
-    console.error('⚠️ Erro na inicialização:', err.message);
+    console.error('❌ ERRO AO CRIAR TABELAS:', err.message);
   }
 };
 
+// --- MIDDLEWARES ---
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'] }));
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
+// --- ROTAS ---
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 
+// Rota de teste
 app.get('/ping', (req, res) => res.send('pong'));
 
+// --- INICIALIZAÇÃO ---
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, async () => {
-  console.log(`🚀 Linkah rodando na porta: ${PORT}`);
+  console.log(`🚀 Servidor Linkah rodando na porta: ${PORT}`);
+  // Executa a criação das tabelas assim que o servidor liga
   await inicializarBanco();
 });
