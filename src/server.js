@@ -8,8 +8,15 @@ const db = require('./config/database');
 
 const app = express();
 
+// --- CONFIGURAÇÃO DO CORS ---
+// Durante o desenvolvimento, o '*' permite que qualquer site (como o Amplify) acesse sua API.
+app.use(cors({
+  origin: '*', 
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(helmet());
-app.use(cors());
 
 // ESSENCIAL: Aumentar o limite para receber a imagem em Base64
 app.use(express.json({ limit: '10mb' }));
@@ -24,6 +31,6 @@ app.get('/ping', (req, res) => res.send('pong'));
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`🚀 Linkah rodando em http://localhost:${PORT}`);
+  console.log(`🚀 Linkah rodando na porta: ${PORT}`);
   console.log(`--- Banco: ${process.env.DB_HOST} ---`);
 });
