@@ -2,18 +2,19 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+
+// Verifique no seu GitHub se a pasta começa com letra MAIÚSCULA (Routes) ou minúscula (routes)
+// Se estiver 'Routes' no GitHub, mude abaixo para './Routes/authRoutes'
 const authRoutes = require('./routes/authRoutes');
 const eventoRoutes = require('./routes/eventoRoutes'); 
 const db = require('./config/database'); 
 
 const app = express();
 
-// --- FUNÇÃO PARA CRIAR TODAS AS TABELAS AUTOMATICAMENTE ---
 const inicializarBanco = async () => {
   try {
-    console.log('⏳ Verificando e criando tabelas no banco de dados...');
+    console.log('⏳ Sincronizando tabelas...');
 
-    // 1. TABELA DE PRODUTORES (Campos exatos do authController.js)
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.produtores (
         email VARCHAR(255) PRIMARY KEY,
@@ -35,10 +36,7 @@ const inicializarBanco = async () => {
         foto_perfil TEXT,
         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
 
-    // 2. TABELA DE EVENTOS (Unificada para Presencial e Online)
-    await db.query(`
       CREATE TABLE IF NOT EXISTS public.eventos (
         id SERIAL PRIMARY KEY,
         produtor_email VARCHAR(255) REFERENCES public.produtores(email) ON DELETE CASCADE,
@@ -62,10 +60,7 @@ const inicializarBanco = async () => {
         imagem_capa TEXT,
         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
 
-    // 3. TABELA DE INGRESSOS (Para o funcionamento do salvarIngressos)
-    await db.query(`
       CREATE TABLE IF NOT EXISTS public.ingressos (
         id SERIAL PRIMARY KEY,
         evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE,
@@ -81,23 +76,18 @@ const inicializarBanco = async () => {
   }
 };
 
-// --- MIDDLEWARES ---
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'] }));
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ limit: '15mb', extended: true }));
 
-// --- ROTAS ---
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 
-// Rota de teste
 app.get('/ping', (req, res) => res.send('pong'));
 
-// --- INICIALIZAÇÃO ---
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, async () => {
   console.log(`🚀 Servidor Linkah rodando na porta: ${PORT}`);
-  // Executa a criação das tabelas ao ligar o server
   await inicializarBanco();
 });
