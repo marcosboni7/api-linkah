@@ -3,18 +3,19 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 
-// Verifique no seu GitHub se a pasta começa com letra MAIÚSCULA (Routes) ou minúscula (routes)
-// Se estiver 'Routes' no GitHub, mude abaixo para './Routes/authRoutes'
-const authRoutes = require('./routes/authRoutes');
-const eventoRoutes = require('./routes/eventoRoutes'); 
-const db = require('./config/database'); 
+// CAMINHOS CORRIGIDOS: Apontando para dentro da pasta 'src'
+const authRoutes = require('./src/routes/authRoutes');
+const eventoRoutes = require('./src/routes/eventoRoutes'); 
+const db = require('./src/config/database'); 
 
 const app = express();
 
+// --- FUNÇÃO DE INICIALIZAÇÃO DO BANCO ---
 const inicializarBanco = async () => {
   try {
-    console.log('⏳ Sincronizando tabelas...');
+    console.log('⏳ Sincronizando tabelas com o código JavaScript...');
 
+    // 1. TABELA DE PRODUTORES
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.produtores (
         email VARCHAR(255) PRIMARY KEY,
@@ -36,7 +37,10 @@ const inicializarBanco = async () => {
         foto_perfil TEXT,
         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
 
+    // 2. TABELA DE EVENTOS
+    await db.query(`
       CREATE TABLE IF NOT EXISTS public.eventos (
         id SERIAL PRIMARY KEY,
         produtor_email VARCHAR(255) REFERENCES public.produtores(email) ON DELETE CASCADE,
@@ -60,7 +64,10 @@ const inicializarBanco = async () => {
         imagem_capa TEXT,
         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
 
+    // 3. TABELA DE INGRESSOS
+    await db.query(`
       CREATE TABLE IF NOT EXISTS public.ingressos (
         id SERIAL PRIMARY KEY,
         evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE,
@@ -70,24 +77,27 @@ const inicializarBanco = async () => {
       );
     `);
 
-    console.log('✅ Estrutura do banco de dados pronta!');
+    console.log('✅ Estrutura completa pronta para uso!');
   } catch (err) {
     console.error('❌ ERRO NA INICIALIZAÇÃO DO BANCO:', err.message);
   }
 };
 
+// --- MIDDLEWARES ---
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'] }));
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ limit: '15mb', extended: true }));
 
+// --- ROTAS ---
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 
 app.get('/ping', (req, res) => res.send('pong'));
 
+// --- INICIALIZAÇÃO ---
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, async () => {
-  console.log(`🚀 Servidor Linkah rodando na porta: ${PORT}`);
+  console.log(`🚀 Back-end Linkah rodando na porta: ${PORT}`);
   await inicializarBanco();
 });
