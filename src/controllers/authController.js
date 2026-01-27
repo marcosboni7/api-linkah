@@ -1,6 +1,6 @@
 const db = require('../config/database');
 const crypto = require('crypto');
-const resend = require('../config/mailer');
+const sendMail = require('../config/mailer'); // Agora importa o seu mailer.js com Nodemailer
 
 // --- 1. CADASTRO DE PRODUTOR ---
 exports.registerProdutor = async (req, res) => {
@@ -52,23 +52,24 @@ exports.registerProdutor = async (req, res) => {
 
         const result = await db.query(query, values);
 
-        // 📧 ENVIO DO E-MAIL VIA RESEND
-        resend.emails.send({
-            from: 'Linkah <onboarding@resend.dev>',
-            to: email,
-            subject: 'Sua senha de acesso - Linkah',
-            html: `
-                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #ddd; padding: 20px; border-radius: 10px;">
-                    <h2 style="color: #007bff; text-align: center;">Bem-vindo ao Linkah!</h2>
-                    <p>Olá <strong>${nome}</strong>,</p>
-                    <p>Seu cadastro foi realizado com sucesso. Aqui estão seus dados de acesso:</p>
-                    <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; border: 1px dashed #ccc;">
-                        <p style="margin: 5px 0;"><strong>E-mail:</strong> ${email}</p>
-                        <p style="margin: 5px 0;"><strong>Senha Provisória:</strong> <span style="color: #d9534f; font-weight: bold; font-size: 1.2em;">${senhaGerada}</span></p>
-                    </div>
+        // 📧 ENVIO DO E-MAIL VIA GMAIL (NODEMAILER)
+        const htmlContent = `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #ddd; padding: 20px; border-radius: 10px;">
+                <h2 style="color: #C22973; text-align: center;">Bem-vindo ao Linkah!</h2>
+                <p>Olá <strong>${nome}</strong>,</p>
+                <p>Seu cadastro foi realizado com sucesso. Aqui estão seus dados de acesso:</p>
+                <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; border: 1px dashed #ccc;">
+                    <p style="margin: 5px 0;"><strong>E-mail:</strong> ${email}</p>
+                    <p style="margin: 5px 0;"><strong>Senha Provisória:</strong> <span style="color: #d9534f; font-weight: bold; font-size: 1.2em;">${senhaGerada}</span></p>
                 </div>
-            `
-        }).catch(err => console.error("❌ ERRO NO RESEND:", err.message));
+                <p style="margin-top: 20px; text-align: center;">
+                    <a href="https://linkah.vercel.app" style="background: #C22973; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">Acessar Painel</a>
+                </p>
+            </div>
+        `;
+
+        // Chama a função que criamos no mailer.js
+        await sendMail(email, 'Sua senha de acesso - Linkah', htmlContent);
 
         return res.status(201).json({ 
             message: "Cadastro realizado!", 
@@ -117,7 +118,6 @@ exports.getPerfil = async (req, res) => {
             return res.status(404).json({ message: "Usuário não encontrado." });
         }
 
-        // Retorna o objeto direto para o front ler sem precisar de data.user
         return res.status(200).json(result.rows[0]);
     } catch (err) {
         return res.status(500).json({ message: "Erro ao buscar perfil" });

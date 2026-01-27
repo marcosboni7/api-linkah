@@ -1,6 +1,31 @@
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 
-// Use a nova chave que você gerou
-const resend = new Resend('re_HwHuMfRb_6J4UzpkVZPXoupyeRRsnigmR');
+// Configuração do motor de envio (Gmail)
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: 'marcosphara@gmail.com',
+    pass: 'kytyrxzjlgsxqvjq' // Sua senha de app (sem espaços)
+  }
+});
 
-module.exports = resend;
+// Função principal de envio
+const sendMail = async (to, subject, html) => {
+  const mailOptions = {
+    from: '"LINKAH" <marcosphara@gmail.com>',
+    to,
+    subject,
+    html
+  };
+
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    console.log('✅ E-mail enviado: ' + info.response);
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Erro no mailer.js:', error);
+    return { success: false, error };
+  }
+};
+
+module.exports = sendMail;
