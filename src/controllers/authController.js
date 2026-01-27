@@ -3,36 +3,48 @@ const db = require('../config/database');
 // --- 1. CADASTRO DE PRODUTOR ---
 exports.registerProdutor = async (req, res) => {
     try {
-        // ESSA LINHA É A MAIS IMPORTANTE PARA O DEBUG:
-        console.log("📦 CORPO DA REQUISIÇÃO RECEBIDO:", req.body);
+        console.log("📦 CORPO DA REQUISICAO:", req.body);
 
-        const nome = req.body?.nome || req.body?.name || req.body?.userName;
-        const email = req.body?.email || req.body?.userEmail || req.body?.produtor_email;
-        const senha = req.body?.senha || req.body?.password || req.body?.userPassword;
+        // Ajustado para os nomes exatos que apareceram no seu LOG
+        const nome = req.body.nome;
+        const email = req.body.email || req.body['E-mail']; // Aceita 'email' ou 'E-mail'
+        const senha = req.body.senha || req.body.password || req.body.password_hash; 
 
+        // IMPORTANTE: Se a senha nao vier, vamos logar o erro
         if (!nome || !email || !senha) {
-            console.error("⚠️ CAMPOS FALTANDO:", { nome, email, senha });
+            console.error("⚠️ CAMPOS FALTANDO NO REGISTRO:", { 
+                nome: nome ? "OK" : "Faltando", 
+                email: email ? "OK" : "Faltando", 
+                senha: senha ? "Faltando (Verifique o Front-end)" : "OK" 
+            });
             return res.status(400).json({ 
-                message: "Preencha todos os campos obrigatórios.",
-                debug: { 
-                    recebido: req.body, 
-                    esperado: ["nome", "email", "senha"] 
-                }
+                message: "A senha e obrigatoria para o cadastro.",
+                debug: { recebido: req.body }
             });
         }
 
         // Verifica duplicidade
         const checkUser = await db.query('SELECT * FROM public.produtores WHERE email = $1', [email]);
         if (checkUser.rows.length > 0) {
-            return res.status(400).json({ message: "Este e-mail já está cadastrado." });
+            return res.status(400).json({ message: "Este e-mail ja esta cadastrado." });
         }
 
-        const query = `INSERT INTO public.produtores (nome, email, senha) VALUES ($1, $2, $3) RETURNING id, nome, email`;
-        const result = await db.query(query, [nome, email, senha]);
+        // Insere com os dados extras que voce ja esta enviando
+        const query = `
+            INSERT INTO public.produtores (nome, email, senha, cpf_cnpj, telefone, tipo) 
+            VALUES ($1, $2, $3, $4, $5, $6) 
+            RETURNING id, nome, email;
+        `;
+        const result = await db.query(query, [
+            nome, email, senha, 
+            req.body.cpf_cnpj || null, 
+            req.body.telefone || null, 
+            req.body.tipo || 'PF'
+        ]);
 
         return res.status(201).json({ message: "Cadastro realizado!", user: result.rows[0] });
     } catch (err) {
-        console.error("❌ ERRO NO SELETOR:", err.message);
+        console.error("❌ ERRO NO BANCO:", err.message);
         return res.status(500).json({ message: "Erro interno", error: err.message });
     }
 };
