@@ -1,6 +1,6 @@
 const db = require('../config/database');
 const crypto = require('crypto');
-const transporter = require('../config/mailer'); // Importando o seu mailer pronto
+const resend = require('../config/mailer'); // Importando o Resend configurado
 
 // --- 1. CADASTRO DE PRODUTOR ---
 exports.registerProdutor = async (req, res) => {
@@ -48,9 +48,9 @@ exports.registerProdutor = async (req, res) => {
 
         const result = await db.query(query, values);
 
-        // 📧 ENVIO DO E-MAIL USANDO SEU TRANSPORTER
-        const mailOptions = {
-            from: `"Linkah Sistema" <${process.env.EMAIL_USER}>`,
+        // 📧 ENVIO DO E-MAIL USANDO RESEND (API HTTPS - Sem Timeout)
+        resend.emails.send({
+            from: 'Linkah <onboarding@resend.dev>', // No plano grátis use este
             to: email,
             subject: 'Sua senha de acesso - Linkah',
             html: `
@@ -67,14 +67,10 @@ exports.registerProdutor = async (req, res) => {
                     </p>
                 </div>
             `
-        };
-
-        transporter.sendMail(mailOptions, (error, info) => {
-            if (error) {
-                console.error("❌ ERRO AO ENVIAR E-MAIL:", error.message);
-            } else {
-                console.log("📧 E-mail enviado para: " + email);
-            }
+        }).then(response => {
+            console.log("📧 E-mail enviado com sucesso via Resend:", response);
+        }).catch(err => {
+            console.error("❌ ERRO NO RESEND:", err.message);
         });
 
         return res.status(201).json({ 
