@@ -2,31 +2,33 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 
-// --- AUTENTICAÇÃO ---
+// --- 🔐 AUTENTICAÇÃO ---
 
 // Rota de Cadastro Inicial 
-// (Gera a senha, salva no banco e dispara o e-mail de boas-vindas)
+// Chama a função 'registerProdutor' no authController.js
 router.post('/register', authController.registerProdutor);
 
 // Rota de Login 
-// (Valida e-mail/senha e retorna o Token/Session e os dados do usuário)
+// Chama a função 'login' no authController.js
 router.post('/login', authController.login);
 
 
-// --- GERENCIAMENTO DE PERFIL ---
+// --- 👤 GERENCIAMENTO DE PERFIL ---
 
 // Buscar os dados do produtor (GET) 
-// Usada no `useEffect` da página de Perfil para preencher os inputs
+// Chama a função 'getPerfil' no authController.js
 router.get('/perfil', authController.getPerfil); 
 
 // Atualizar os dados do produtor (PUT) 
-// Usada no botão "Salvar Alterações" do Perfil ou Dashboard
+// Chama a função 'updatePerfil' no authController.js
 router.put('/perfil', authController.updatePerfil); 
 
 
-// --- SEGURANÇA (Opcional, mas recomendado) ---
+// --- 🛠️ MANUTENÇÃO (Opcional) ---
 
-// Se você decidir usar recuperação de senha futuramente
-// router.post('/forgot-password', authController.forgotPassword);
+// Caso precise testar se a rota de autenticação está viva
+router.get('/status', (req, res) => {
+    res.status(200).json({ message: "API de Autenticação Online" });
+});
 
 module.exports = router;
