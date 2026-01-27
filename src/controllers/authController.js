@@ -8,19 +8,19 @@ exports.registerProdutor = async (req, res) => {
 
         const nome = (req.body.nome || '').trim();
         const email = (req.body.email || '').trim().toLowerCase();
-        const senha = req.body.senha; // Pega a senha que o usuário criou no site
+        const senha = req.body.senha; // Recebe a senha vinda do front-end
 
         if (!nome || !email || !senha) {
             return res.status(400).json({ message: "Nome, E-mail e Senha são obrigatórios." });
         }
 
-        // Verifica se o e-mail já existe
+        // Verifica duplicidade
         const checkUser = await db.query('SELECT * FROM public.produtores WHERE LOWER(email) = $1', [email]);
         if (checkUser.rows.length > 0) {
             return res.status(400).json({ message: "Este e-mail já está cadastrado." });
         }
 
-        // Salva no Banco com a senha do usuário
+        // Salva no Banco com a senha escolhida pelo usuário
         const query = `
             INSERT INTO public.produtores (
                 nome, email, senha, cpf_cnpj, telefone, tipo, 
@@ -33,31 +33,36 @@ exports.registerProdutor = async (req, res) => {
         
         const values = [
             nome, email, senha, 
-            req.body.cpf_cnpj || null, req.body.telefone || null, req.body.tipo || 'PF',
-            req.body.data_nascimento || null, req.body.cep || null, req.body.rua || null,
-            req.body.numero || null, req.body.bairro || null, req.body.estado || null,
-            req.body.instagram || null, req.body.facebook || null, req.body.descricao || null,
+            req.body.cpf_cnpj || null, 
+            req.body.telefone || null, 
+            req.body.tipo || 'PF',
+            req.body.data_nascimento || null,
+            req.body.cep || null,
+            req.body.rua || null,
+            req.body.numero || null,
+            req.body.bairro || null,
+            req.body.estado || null,
+            req.body.instagram || null,
+            req.body.facebook || null,
+            req.body.descricao || null,
             req.body.razao_social || null
         ];
 
         await db.query(query, values);
 
-        // 📧 E-MAIL DE BOAS-VINDAS (SEM SENHA)
+        // e-mail de Boas-vindas SEM SENHA
         const htmlContent = `
-            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #eee; padding: 30px; border-radius: 16px;">
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #eee; padding: 25px; border-radius: 12px;">
                 <h2 style="color: #C22973; text-align: center;">Bem-vindo(a) à LINKAH!</h2>
                 <p>Olá <strong>${nome}</strong>,</p>
-                <p>Sua conta profissional foi criada com sucesso! Agora você já pode acessar a plataforma com seu e-mail e a senha que você cadastrou.</p>
+                <p>Sua conta profissional foi criada com sucesso! Agora você já pode acessar a plataforma com seu e-mail e a senha que você escolheu.</p>
                 <div style="text-align: center; margin-top: 30px;">
-                    <a href="https://linkah.vercel.app" style="background: #C22973; color: white; padding: 14px 25px; text-decoration: none; border-radius: 10px; font-weight: bold; display: inline-block;">ACESSAR MEU PAINEL</a>
+                    <a href="https://linkah.vercel.app" style="background: #C22973; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; font-weight: bold;">ACESSAR MEU PAINEL</a>
                 </div>
-                <hr style="border: 0; border-top: 1px solid #eee; margin: 30px 0;">
-                <p style="font-size: 12px; color: #999; text-align: center;">Se você não realizou este cadastro, por favor ignore este e-mail.</p>
             </div>
         `;
 
-        // Envia o e-mail usando o seu mailer.js (Gmail)
-        await sendMail(email, 'Sua conta na Linkah está pronta!', htmlContent);
+        await sendMail(email, 'Bem-vindo à Linkah!', htmlContent);
 
         return res.status(201).json({ message: "Cadastro realizado com sucesso!" });
 
