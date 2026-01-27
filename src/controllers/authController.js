@@ -7,29 +7,31 @@ exports.registerProdutor = async (req, res) => {
     try {
         console.log("📦 CORPO DA REQUISICAO:", req.body);
 
-        const nome = req.body.nome || req.body.name;
-        const email = req.body.email || req.body['E-mail'];
+        // Normalização dos dados recebidos
+        const nome = (req.body.nome || req.body.name || '').trim();
+        const email = (req.body.email || req.body['E-mail'] || '').trim().toLowerCase();
 
         if (!nome || !email) {
-            return res.status(400).json({ message: "Nome e E-mail sao obrigatorios." });
+            return res.status(400).json({ message: "Nome e E-mail são obrigatórios." });
         }
 
-        // 🔑 Geração da senha automática
+        // 🔑 Geração da senha automática (8 caracteres hex)
         const senhaGerada = crypto.randomBytes(4).toString('hex'); 
 
-        // Verifica duplicidade
-        const checkUser = await db.query('SELECT * FROM public.produtores WHERE email = $1', [email]);
+        // Verifica duplicidade no banco
+        const checkUser = await db.query('SELECT * FROM public.produtores WHERE LOWER(email) = $1', [email]);
         if (checkUser.rows.length > 0) {
-            return res.status(400).json({ message: "Este e-mail ja esta cadastrado." });
+            return res.status(400).json({ message: "Este e-mail já está cadastrado." });
         }
 
-        // 💾 Salva no Banco com todos os campos do seu formulário
+        // 💾 Salva no Banco
         const query = `
             INSERT INTO public.produtores (
                 nome, email, senha, cpf_cnpj, telefone, tipo, 
-                data_nascimento, cep, rua, numero, bairro, estado
+                data_nascimento, cep, rua, numero, bairro, estado,
+                instagram, facebook, descricao
             ) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) 
             RETURNING id, nome, email;
         `;
         
@@ -43,14 +45,17 @@ exports.registerProdutor = async (req, res) => {
             req.body.rua || null,
             req.body.numero || null,
             req.body.bairro || null,
-            req.body.estado || null
+            req.body.estado || null,
+            req.body.instagram || null,
+            req.body.facebook || null,
+            req.body.descricao || null
         ];
 
         const result = await db.query(query, values);
 
-        // 📧 ENVIO DO E-MAIL USANDO RESEND (API HTTPS - Sem Timeout)
+        // 📧 ENVIO DO E-MAIL USANDO RESEND
         resend.emails.send({
-            from: 'Linkah <onboarding@resend.dev>', // No plano grátis use este
+            from: 'Linkah <onboarding@resend.dev>',
             to: email,
             subject: 'Sua senha de acesso - Linkah',
             html: `
@@ -87,17 +92,19 @@ exports.registerProdutor = async (req, res) => {
 // --- 2. LOGIN ---
 exports.login = async (req, res) => {
     try {
-        const email = req.body.email || req.body.userEmail;
-        const senha = req.body.senha || req.body.password;
+        const email = (req.body.email || req.body.userEmail || '').trim().toLowerCase();
+        const senha = (req.body.senha || req.body.password || '').trim();
 
         if (!email || !senha) {
-            return res.status(400).json({ message: "E-mail e senha sao obrigatorios." });
+            return res.status(400).json({ message: "E-mail e senha são obrigatórios." });
         }
 
-        const query = 'SELECT * FROM public.produtores WHERE email = $1 AND senha = $2';
+        // Busca exata por e-mail e senha
+        const query = 'SELECT * FROM public.produtores WHERE LOWER(email) = $1 AND senha = $2';
         const result = await db.query(query, [email, senha]);
 
         if (result.rows.length === 0) {
+            console.log(`❌ Tentativa inválida: ${email} | Senha usada: ${senha}`);
             return res.status(401).json({ message: "E-mail ou senha incorretos." });
         }
 
@@ -107,6 +114,7 @@ exports.login = async (req, res) => {
             user: { id: user.id, nome: user.nome, email: user.email }
         });
     } catch (err) {
+        console.error("❌ ERRO NO LOGIN:", err.message);
         return res.status(500).json({ message: "Erro no login" });
     }
 };
@@ -114,10 +122,22 @@ exports.login = async (req, res) => {
 // --- 3. BUSCAR PERFIL ---
 exports.getPerfil = async (req, res) => {
     try {
-        const { email } = req.query; 
-        const result = await db.query('SELECT * FROM public.produtores WHERE email = $1', [email]);
-        return res.status(200).json(result.rows[0] || {});
+        const email = (req.query.email || '').trim().toLowerCase();
+        
+        if (!email) {
+            return res.status(400).json({ message: "E-mail não fornecido." });
+        }
+
+        const result = await db.query('SELECT * FROM public.produtores WHERE LOWER(email) = $1', [email]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Usuário não encontrado." });
+        }
+
+        // Retorna todos os dados para preencher o formulário no front
+        return res.status(200).json(result.rows[0]);
     } catch (err) {
+        console.error("❌ ERRO NO PERFIL:", err.message);
         return res.status(500).json({ message: "Erro ao buscar perfil" });
     }
 };
@@ -126,12 +146,15 @@ exports.getPerfil = async (req, res) => {
 exports.updatePerfil = async (req, res) => {
     try {
         const { email_original, nome, email_novo, foto_perfil } = req.body;
+        
         await db.query(
-            'UPDATE public.produtores SET nome=$1, email=$2, foto_perfil=$3 WHERE email=$4', 
-            [nome, email_novo, foto_perfil, email_original]
+            'UPDATE public.produtores SET nome=$1, email=$2, foto_perfil=$3 WHERE LOWER(email)=$4', 
+            [nome, email_novo, foto_perfil, email_original.toLowerCase()]
         );
+        
         return res.status(200).json({ message: "Perfil atualizado!" });
     } catch (err) {
+        console.error("❌ ERRO NA ATUALIZAÇÃO:", err.message);
         return res.status(500).json({ message: "Erro ao atualizar perfil" });
     }
 };
