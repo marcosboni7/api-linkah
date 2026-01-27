@@ -12,13 +12,32 @@ const app = express();
 
 // --- 1. MIDDLEWARES (ORDEM IMPORTANTE) ---
 
-// CORS: Permite que o Front-end fale com o Back-end sem ser bloqueado
-app.use(cors()); 
+// CORS CONFIGURADO: Agora aceita seu link ivory e seu domínio oficial
+const allowedOrigins = [
+  'https://linkah-frontend-ivory.vercel.app',
+  'https://linkah.com.br',
+  'https://www.linkah.com.br',
+  'http://localhost:3000' // Para testes locais
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Permite requests sem origin (como mobile apps ou curl)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'A política CORS para este site não permite acesso da origem especificada.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true
+}));
 
 // HELMET: Segurança básica para os headers
 app.use(helmet({ contentSecurityPolicy: false }));
 
-// PARSERS: Necessário para o servidor conseguir ler os dados (JSON) que você envia no formulário
+// PARSERS: Limite de 15mb para permitir upload de fotos de perfil/capa em Base64
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ limit: '15mb', extended: true }));
 
@@ -27,6 +46,7 @@ const inicializarBanco = async () => {
   try {
     console.log('⏳ Sincronizando tabelas com o banco de dados...');
 
+    // Tabela de Produtores atualizada com campos de redes sociais e endereço
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.produtores (
         email VARCHAR(255) PRIMARY KEY,
@@ -92,7 +112,11 @@ const inicializarBanco = async () => {
 app.use((req, res, next) => {
   if (req.method === 'POST' || req.method === 'PUT') {
     console.log(`📥 [${req.method}] Rota: ${req.url}`);
-    console.log(`📦 Dados Recebidos:`, JSON.stringify(req.body));
+    // Log resumido para não inundar o console com Base64 de imagens
+    const bodyLog = { ...req.body };
+    if (bodyLog.foto_perfil) bodyLog.foto_perfil = "IMAGEM_BASE64_OMITIDA";
+    if (bodyLog.imagem_capa) bodyLog.imagem_capa = "IMAGEM_BASE64_OMITIDA";
+    console.log(`📦 Dados Recebidos:`, JSON.stringify(bodyLog));
   }
   next();
 });
