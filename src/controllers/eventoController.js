@@ -122,3 +122,16 @@ exports.excluirEvento = async (req, res) => {
     return res.status(500).json({ message: "Erro ao excluir" });
   }
 };
+
+// --- 7. EDITAR STATUS ---
+exports.atualizarStatus = async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  try {
+    await db.query('UPDATE public.eventos SET status = $1 WHERE id = $2', [status, id]);
+    return res.status(200).json({ message: "Status OK" });
+  } catch (err) {
+    console.error("Erro status:", err.message);
+    return res.status(500).json({ message: "Erro status" });
+  }
+};
