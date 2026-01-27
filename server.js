@@ -3,17 +3,29 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 
-// CAMINHOS CORRIGIDOS: Apontando para dentro da pasta 'src'
+// CAMINHOS: Apontando para dentro da pasta 'src'
 const authRoutes = require('./src/routes/authRoutes');
 const eventoRoutes = require('./src/routes/eventoRoutes'); 
 const db = require('./src/config/database'); 
 
 const app = express();
 
-// --- FUNÇÃO DE INICIALIZAÇÃO DO BANCO ---
+// --- 1. MIDDLEWARES (ORDEM IMPORTANTE) ---
+
+// CORS: Permite que o Front-end fale com o Back-end sem ser bloqueado
+app.use(cors()); 
+
+// HELMET: Segurança básica para os headers
+app.use(helmet({ contentSecurityPolicy: false }));
+
+// PARSERS: Necessário para o servidor conseguir ler os dados (JSON) que você envia no formulário
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ limit: '15mb', extended: true }));
+
+// --- 2. FUNÇÃO DE INICIALIZAÇÃO DO BANCO ---
 const inicializarBanco = async () => {
   try {
-    console.log('⏳ Sincronizando tabelas com o código JavaScript...');
+    console.log('⏳ Sincronizando tabelas com o banco de dados...');
 
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.produtores (
@@ -70,32 +82,31 @@ const inicializarBanco = async () => {
       );
     `);
 
-    console.log('✅ Estrutura completa pronta para uso!');
+    console.log('✅ Estrutura do banco de dados verificada/criada!');
   } catch (err) {
     console.error('❌ ERRO NA INICIALIZAÇÃO DO BANCO:', err.message);
   }
 };
 
-// --- MIDDLEWARES (AJUSTADO PARA FUNCIONAR NA VERCEL) ---
-app.use(cors({
-  origin: '*', // Permite qualquer origem
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // OPTIONS é importante para o navegador
-  allowedHeaders: ['Content-Type', 'Authorization'] // Garante que esses cabeçalhos passem
-}));
+// --- 3. LOG DE MONITORAMENTO (DEBUG) ---
+app.use((req, res, next) => {
+  if (req.method === 'POST' || req.method === 'PUT') {
+    console.log(`📥 [${req.method}] Rota: ${req.url}`);
+    console.log(`📦 Dados Recebidos:`, JSON.stringify(req.body));
+  }
+  next();
+});
 
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(express.json({ limit: '15mb' }));
-app.use(express.urlencoded({ limit: '15mb', extended: true }));
-
-// --- ROTAS ---
+// --- 4. ROTAS ---
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 
-app.get('/ping', (req, res) => res.send('pong'));
+// Rota de teste
+app.get('/ping', (req, res) => res.status(200).send('Linkah API Online 🚀'));
 
-// --- INICIALIZAÇÃO ---
+// --- 5. INICIALIZAÇÃO DO SERVIDOR ---
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, async () => {
-  console.log(`🚀 Back-end Linkah rodando na porta: ${PORT}`);
+  console.log(`🚀 Servidor rodando na porta: ${PORT}`);
   await inicializarBanco();
 });

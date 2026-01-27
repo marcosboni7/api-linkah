@@ -3,41 +3,37 @@ const db = require('../config/database');
 // --- 1. CADASTRO DE PRODUTOR ---
 exports.registerProdutor = async (req, res) => {
     try {
-        // Aceita variações de nomes vindas do Front-end
-        const nome = req.body.nome || req.body.name;
-        const email = req.body.email || req.body.produtor_email || req.body.userEmail;
-        const senha = req.body.senha || req.body.password;
+        // ESSA LINHA É A MAIS IMPORTANTE PARA O DEBUG:
+        console.log("📦 CORPO DA REQUISIÇÃO RECEBIDO:", req.body);
 
-        console.log("📝 Tentativa de registro:", { nome, email });
+        const nome = req.body?.nome || req.body?.name || req.body?.userName;
+        const email = req.body?.email || req.body?.userEmail || req.body?.produtor_email;
+        const senha = req.body?.senha || req.body?.password || req.body?.userPassword;
 
         if (!nome || !email || !senha) {
+            console.error("⚠️ CAMPOS FALTANDO:", { nome, email, senha });
             return res.status(400).json({ 
                 message: "Preencha todos os campos obrigatórios.",
-                detalhes: {
-                    nome: nome ? "recebido" : "vazio",
-                    email: email ? "recebido" : "vazio",
-                    senha: senha ? "recebido" : "vazio"
+                debug: { 
+                    recebido: req.body, 
+                    esperado: ["nome", "email", "senha"] 
                 }
             });
         }
 
-        // Verifica se o e-mail já existe
+        // Verifica duplicidade
         const checkUser = await db.query('SELECT * FROM public.produtores WHERE email = $1', [email]);
         if (checkUser.rows.length > 0) {
             return res.status(400).json({ message: "Este e-mail já está cadastrado." });
         }
 
-        const query = `
-            INSERT INTO public.produtores (nome, email, senha)
-            VALUES ($1, $2, $3)
-            RETURNING id, nome, email;
-        `;
+        const query = `INSERT INTO public.produtores (nome, email, senha) VALUES ($1, $2, $3) RETURNING id, nome, email`;
         const result = await db.query(query, [nome, email, senha]);
 
         return res.status(201).json({ message: "Cadastro realizado!", user: result.rows[0] });
     } catch (err) {
-        console.error("❌ ERRO NO CADASTRO:", err.message);
-        return res.status(500).json({ message: "Erro interno no servidor" });
+        console.error("❌ ERRO NO SELETOR:", err.message);
+        return res.status(500).json({ message: "Erro interno", error: err.message });
     }
 };
 
