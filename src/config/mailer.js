@@ -2,13 +2,17 @@ const nodemailer = require('nodemailer');
 
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 465,
-  secure: true, // true para porta 465, false para outras
+  port: 587,
+  secure: false, // false para porta 587
   auth: {
     user: 'marcosphara@gmail.com',
-    pass: 'kytyrxzjlgsxqvjq' // Sua senha de app
+    pass: 'kytyrxzjlgsxqvjq' 
   },
-  connectionTimeout: 10000, // 10 segundos de limite
+  tls: {
+    rejectUnauthorized: false // Ajuda a evitar bloqueios de certificados no Render
+  },
+  connectionTimeout: 20000, // Aumentamos para 20 segundos
+  greetingTimeout: 20000
 });
 
 const sendMail = async (to, subject, html) => {
@@ -22,10 +26,11 @@ const sendMail = async (to, subject, html) => {
   try {
     const info = await transporter.sendMail(mailOptions);
     console.log('✅ E-mail enviado com sucesso!');
-    return { success: true, info };
+    return info;
   } catch (error) {
     console.error('❌ Erro real no envio:', error.message);
-    throw error; // Lança o erro para o controller saber que falhou
+    // Não vamos travar o registro se o e-mail falhar
+    return null; 
   }
 };
 
