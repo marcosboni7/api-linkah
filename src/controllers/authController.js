@@ -1,30 +1,29 @@
 const db = require('../config/database');
 const crypto = require('crypto');
-const resend = require('../config/mailer'); // Importando o Resend configurado
+const resend = require('../config/mailer');
 
 // --- 1. CADASTRO DE PRODUTOR ---
 exports.registerProdutor = async (req, res) => {
     try {
-        console.log("📦 CORPO DA REQUISICAO:", req.body);
+        console.log("📦 NOVO CADASTRO RECEBIDO:", req.body);
 
-        // Normalização dos dados recebidos
-        const nome = (req.body.nome || req.body.name || '').trim();
-        const email = (req.body.email || req.body['E-mail'] || '').trim().toLowerCase();
+        const nome = (req.body.nome || '').trim();
+        const email = (req.body.email || '').trim().toLowerCase();
 
         if (!nome || !email) {
             return res.status(400).json({ message: "Nome e E-mail são obrigatórios." });
         }
 
-        // 🔑 Geração da senha automática (8 caracteres hex)
+        // 🔑 Geração da senha automática
         const senhaGerada = crypto.randomBytes(4).toString('hex'); 
 
-        // Verifica duplicidade no banco
+        // Verifica duplicidade
         const checkUser = await db.query('SELECT * FROM public.produtores WHERE LOWER(email) = $1', [email]);
         if (checkUser.rows.length > 0) {
             return res.status(400).json({ message: "Este e-mail já está cadastrado." });
         }
 
-        // 💾 Salva no Banco
+        // 💾 Salva no Banco com todos os campos
         const query = `
             INSERT INTO public.produtores (
                 nome, email, senha, cpf_cnpj, telefone, tipo, 
@@ -53,7 +52,7 @@ exports.registerProdutor = async (req, res) => {
 
         const result = await db.query(query, values);
 
-        // 📧 ENVIO DO E-MAIL USANDO RESEND
+        // 📧 ENVIO DO E-MAIL VIA RESEND
         resend.emails.send({
             from: 'Linkah <onboarding@resend.dev>',
             to: email,
@@ -67,19 +66,12 @@ exports.registerProdutor = async (req, res) => {
                         <p style="margin: 5px 0;"><strong>E-mail:</strong> ${email}</p>
                         <p style="margin: 5px 0;"><strong>Senha Provisória:</strong> <span style="color: #d9534f; font-weight: bold; font-size: 1.2em;">${senhaGerada}</span></p>
                     </div>
-                    <p style="font-size: 0.9em; color: #666; margin-top: 20px;">
-                        Use esta senha para seu primeiro login. Você poderá alterá-la a qualquer momento no seu perfil.
-                    </p>
                 </div>
             `
-        }).then(response => {
-            console.log("📧 E-mail enviado com sucesso via Resend:", response);
-        }).catch(err => {
-            console.error("❌ ERRO NO RESEND:", err.message);
-        });
+        }).catch(err => console.error("❌ ERRO NO RESEND:", err.message));
 
         return res.status(201).json({ 
-            message: "Cadastro realizado com sucesso! Verifique seu e-mail.", 
+            message: "Cadastro realizado!", 
             user: result.rows[0] 
         });
 
@@ -92,19 +84,13 @@ exports.registerProdutor = async (req, res) => {
 // --- 2. LOGIN ---
 exports.login = async (req, res) => {
     try {
-        const email = (req.body.email || req.body.userEmail || '').trim().toLowerCase();
-        const senha = (req.body.senha || req.body.password || '').trim();
+        const email = (req.body.email || '').trim().toLowerCase();
+        const senha = (req.body.senha || '').trim();
 
-        if (!email || !senha) {
-            return res.status(400).json({ message: "E-mail e senha são obrigatórios." });
-        }
-
-        // Busca exata por e-mail e senha
         const query = 'SELECT * FROM public.produtores WHERE LOWER(email) = $1 AND senha = $2';
         const result = await db.query(query, [email, senha]);
 
         if (result.rows.length === 0) {
-            console.log(`❌ Tentativa inválida: ${email} | Senha usada: ${senha}`);
             return res.status(401).json({ message: "E-mail ou senha incorretos." });
         }
 
@@ -114,7 +100,6 @@ exports.login = async (req, res) => {
             user: { id: user.id, nome: user.nome, email: user.email }
         });
     } catch (err) {
-        console.error("❌ ERRO NO LOGIN:", err.message);
         return res.status(500).json({ message: "Erro no login" });
     }
 };
@@ -124,9 +109,7 @@ exports.getPerfil = async (req, res) => {
     try {
         const email = (req.query.email || '').trim().toLowerCase();
         
-        if (!email) {
-            return res.status(400).json({ message: "E-mail não fornecido." });
-        }
+        if (!email) return res.status(400).json({ message: "E-mail não fornecido." });
 
         const result = await db.query('SELECT * FROM public.produtores WHERE LOWER(email) = $1', [email]);
         
@@ -134,10 +117,9 @@ exports.getPerfil = async (req, res) => {
             return res.status(404).json({ message: "Usuário não encontrado." });
         }
 
-        // Retorna todos os dados para preencher o formulário no front
+        // Retorna o objeto direto para o front ler sem precisar de data.user
         return res.status(200).json(result.rows[0]);
     } catch (err) {
-        console.error("❌ ERRO NO PERFIL:", err.message);
         return res.status(500).json({ message: "Erro ao buscar perfil" });
     }
 };
@@ -145,14 +127,28 @@ exports.getPerfil = async (req, res) => {
 // --- 4. ATUALIZAR PERFIL ---
 exports.updatePerfil = async (req, res) => {
     try {
-        const { email_original, nome, email_novo, foto_perfil } = req.body;
+        const { email_original, nome, cpf_cnpj, cep, rua, numero, bairro, estado } = req.body;
         
-        await db.query(
-            'UPDATE public.produtores SET nome=$1, email=$2, foto_perfil=$3 WHERE LOWER(email)=$4', 
-            [nome, email_novo, foto_perfil, email_original.toLowerCase()]
-        );
+        if (!email_original) return res.status(400).json({ message: "E-mail original é necessário." });
+
+        const query = `
+            UPDATE public.produtores 
+            SET nome=$1, cpf_cnpj=$2, cep=$3, rua=$4, numero=$5, bairro=$6, estado=$7
+            WHERE LOWER(email)=$8
+        `;
         
-        return res.status(200).json({ message: "Perfil atualizado!" });
+        await db.query(query, [
+            nome, 
+            cpf_cnpj, 
+            cep, 
+            rua, 
+            numero, 
+            bairro, 
+            estado || 'SP', 
+            email_original.toLowerCase()
+        ]);
+        
+        return res.status(200).json({ message: "Perfil atualizado com sucesso!" });
     } catch (err) {
         console.error("❌ ERRO NA ATUALIZAÇÃO:", err.message);
         return res.status(500).json({ message: "Erro ao atualizar perfil" });
