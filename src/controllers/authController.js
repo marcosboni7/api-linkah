@@ -3,17 +3,21 @@ const db = require('../config/database');
 // --- 1. CADASTRO DE PRODUTOR ---
 exports.registerProdutor = async (req, res) => {
     try {
-        // Aceita 'email' ou 'produtor_email' ou 'userEmail'
+        // Aceita variações de nomes vindas do Front-end
         const nome = req.body.nome || req.body.name;
         const email = req.body.email || req.body.produtor_email || req.body.userEmail;
         const senha = req.body.senha || req.body.password;
 
-        console.log("📝 Tentativa de registro com:", { nome, email });
+        console.log("📝 Tentativa de registro:", { nome, email });
 
         if (!nome || !email || !senha) {
             return res.status(400).json({ 
                 message: "Preencha todos os campos obrigatórios.",
-                recebido: req.body // Isso ajuda a debugar o que chegou de fato
+                detalhes: {
+                    nome: nome ? "recebido" : "vazio",
+                    email: email ? "recebido" : "vazio",
+                    senha: senha ? "recebido" : "vazio"
+                }
             });
         }
 
@@ -40,7 +44,13 @@ exports.registerProdutor = async (req, res) => {
 // --- 2. LOGIN ---
 exports.login = async (req, res) => {
     try {
-        const { email, senha } = req.body;
+        // Também deixei o login flexível para evitar erros
+        const email = req.body.email || req.body.userEmail;
+        const senha = req.body.senha || req.body.password;
+
+        if (!email || !senha) {
+            return res.status(400).json({ message: "E-mail e senha são obrigatórios." });
+        }
 
         const query = 'SELECT * FROM public.produtores WHERE email = $1 AND senha = $2';
         const result = await db.query(query, [email, senha]);
@@ -65,18 +75,18 @@ exports.login = async (req, res) => {
 // --- 3. BUSCAR PERFIL ---
 exports.getPerfil = async (req, res) => {
     try {
-        const { email } = req.query; // Pega o e-mail da URL
+        const { email } = req.query; 
         const query = 'SELECT id, nome, email, foto_perfil FROM public.produtores WHERE email = $1';
         const result = await db.query(query, [email]);
 
         if (result.rows.length === 0) {
-            return res.status(404).json({ message: "Perfil não encontrado" });
+            return res.status(200).json({}); // Retorna vazio em vez de erro para não travar o Front
         }
 
         return res.status(200).json(result.rows[0]);
     } catch (err) {
         console.error("❌ ERRO AO BUSCAR PERFIL:", err.message);
-        return res.status(500).json({ message: "Erro ao buscar dados do perfil" });
+        return res.status(500).json({ message: "Erro ao buscar dados" });
     }
 };
 
@@ -95,7 +105,7 @@ exports.updatePerfil = async (req, res) => {
         const result = await db.query(query, values);
 
         if (result.rows.length === 0) {
-            return res.status(404).json({ message: "Usuário não encontrado para atualizar" });
+            return res.status(404).json({ message: "Usuário não encontrado" });
         }
 
         console.log(`✅ Perfil atualizado: ${email_novo}`);
