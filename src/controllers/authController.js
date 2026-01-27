@@ -1,27 +1,21 @@
 const db = require('../config/database');
+const crypto = require('crypto');
+const transporter = require('../config/mailer'); // Importando o seu mailer pronto
 
 // --- 1. CADASTRO DE PRODUTOR ---
 exports.registerProdutor = async (req, res) => {
     try {
         console.log("📦 CORPO DA REQUISICAO:", req.body);
 
-        // Ajustado para os nomes exatos que apareceram no seu LOG
-        const nome = req.body.nome;
-        const email = req.body.email || req.body['E-mail']; // Aceita 'email' ou 'E-mail'
-        const senha = req.body.senha || req.body.password || req.body.password_hash; 
+        const nome = req.body.nome || req.body.name;
+        const email = req.body.email || req.body['E-mail'];
 
-        // IMPORTANTE: Se a senha nao vier, vamos logar o erro
-        if (!nome || !email || !senha) {
-            console.error("⚠️ CAMPOS FALTANDO NO REGISTRO:", { 
-                nome: nome ? "OK" : "Faltando", 
-                email: email ? "OK" : "Faltando", 
-                senha: senha ? "Faltando (Verifique o Front-end)" : "OK" 
-            });
-            return res.status(400).json({ 
-                message: "A senha e obrigatoria para o cadastro.",
-                debug: { recebido: req.body }
-            });
+        if (!nome || !email) {
+            return res.status(400).json({ message: "Nome e E-mail sao obrigatorios." });
         }
+
+        // 🔑 Geração da senha automática
+        const senhaGerada = crypto.randomBytes(4).toString('hex'); 
 
         // Verifica duplicidade
         const checkUser = await db.query('SELECT * FROM public.produtores WHERE email = $1', [email]);
@@ -29,35 +23,79 @@ exports.registerProdutor = async (req, res) => {
             return res.status(400).json({ message: "Este e-mail ja esta cadastrado." });
         }
 
-        // Insere com os dados extras que voce ja esta enviando
+        // 💾 Salva no Banco com todos os campos do seu formulário
         const query = `
-            INSERT INTO public.produtores (nome, email, senha, cpf_cnpj, telefone, tipo) 
-            VALUES ($1, $2, $3, $4, $5, $6) 
+            INSERT INTO public.produtores (
+                nome, email, senha, cpf_cnpj, telefone, tipo, 
+                data_nascimento, cep, rua, numero, bairro, estado
+            ) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) 
             RETURNING id, nome, email;
         `;
-        const result = await db.query(query, [
-            nome, email, senha, 
+        
+        const values = [
+            nome, email, senhaGerada, 
             req.body.cpf_cnpj || null, 
             req.body.telefone || null, 
-            req.body.tipo || 'PF'
-        ]);
+            req.body.tipo || 'PF',
+            req.body.data_nascimento || null,
+            req.body.cep || null,
+            req.body.rua || null,
+            req.body.numero || null,
+            req.body.bairro || null,
+            req.body.estado || null
+        ];
 
-        return res.status(201).json({ message: "Cadastro realizado!", user: result.rows[0] });
+        const result = await db.query(query, values);
+
+        // 📧 ENVIO DO E-MAIL USANDO SEU TRANSPORTER
+        const mailOptions = {
+            from: `"Linkah Sistema" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: 'Sua senha de acesso - Linkah',
+            html: `
+                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #ddd; padding: 20px; border-radius: 10px;">
+                    <h2 style="color: #007bff; text-align: center;">Bem-vindo ao Linkah!</h2>
+                    <p>Olá <strong>${nome}</strong>,</p>
+                    <p>Seu cadastro foi realizado com sucesso. Aqui estão seus dados de acesso:</p>
+                    <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; border: 1px dashed #ccc;">
+                        <p style="margin: 5px 0;"><strong>E-mail:</strong> ${email}</p>
+                        <p style="margin: 5px 0;"><strong>Senha Provisória:</strong> <span style="color: #d9534f; font-weight: bold; font-size: 1.2em;">${senhaGerada}</span></p>
+                    </div>
+                    <p style="font-size: 0.9em; color: #666; margin-top: 20px;">
+                        Use esta senha para seu primeiro login. Você poderá alterá-la a qualquer momento no seu perfil.
+                    </p>
+                </div>
+            `
+        };
+
+        transporter.sendMail(mailOptions, (error, info) => {
+            if (error) {
+                console.error("❌ ERRO AO ENVIAR E-MAIL:", error.message);
+            } else {
+                console.log("📧 E-mail enviado para: " + email);
+            }
+        });
+
+        return res.status(201).json({ 
+            message: "Cadastro realizado com sucesso! Verifique seu e-mail.", 
+            user: result.rows[0] 
+        });
+
     } catch (err) {
-        console.error("❌ ERRO NO BANCO:", err.message);
-        return res.status(500).json({ message: "Erro interno", error: err.message });
+        console.error("❌ ERRO NO REGISTRO:", err.message);
+        return res.status(500).json({ message: "Erro ao processar cadastro" });
     }
 };
 
 // --- 2. LOGIN ---
 exports.login = async (req, res) => {
     try {
-        // Também deixei o login flexível para evitar erros
         const email = req.body.email || req.body.userEmail;
         const senha = req.body.senha || req.body.password;
 
         if (!email || !senha) {
-            return res.status(400).json({ message: "E-mail e senha são obrigatórios." });
+            return res.status(400).json({ message: "E-mail e senha sao obrigatorios." });
         }
 
         const query = 'SELECT * FROM public.produtores WHERE email = $1 AND senha = $2';
@@ -68,15 +106,12 @@ exports.login = async (req, res) => {
         }
 
         const user = result.rows[0];
-        console.log(`✅ Login realizado: ${user.nome}`);
-        
         return res.status(200).json({
-            message: "Login realizado com sucesso",
+            message: "Login realizado!",
             user: { id: user.id, nome: user.nome, email: user.email }
         });
     } catch (err) {
-        console.error("❌ ERRO NO LOGIN:", err.message);
-        return res.status(500).json({ message: "Erro ao realizar login" });
+        return res.status(500).json({ message: "Erro no login" });
     }
 };
 
@@ -84,17 +119,10 @@ exports.login = async (req, res) => {
 exports.getPerfil = async (req, res) => {
     try {
         const { email } = req.query; 
-        const query = 'SELECT id, nome, email, foto_perfil FROM public.produtores WHERE email = $1';
-        const result = await db.query(query, [email]);
-
-        if (result.rows.length === 0) {
-            return res.status(200).json({}); // Retorna vazio em vez de erro para não travar o Front
-        }
-
-        return res.status(200).json(result.rows[0]);
+        const result = await db.query('SELECT * FROM public.produtores WHERE email = $1', [email]);
+        return res.status(200).json(result.rows[0] || {});
     } catch (err) {
-        console.error("❌ ERRO AO BUSCAR PERFIL:", err.message);
-        return res.status(500).json({ message: "Erro ao buscar dados" });
+        return res.status(500).json({ message: "Erro ao buscar perfil" });
     }
 };
 
@@ -102,24 +130,12 @@ exports.getPerfil = async (req, res) => {
 exports.updatePerfil = async (req, res) => {
     try {
         const { email_original, nome, email_novo, foto_perfil } = req.body;
-
-        const query = `
-            UPDATE public.produtores 
-            SET nome = $1, email = $2, foto_perfil = $3
-            WHERE email = $4
-            RETURNING id, nome, email;
-        `;
-        const values = [nome, email_novo, foto_perfil, email_original];
-        const result = await db.query(query, values);
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({ message: "Usuário não encontrado" });
-        }
-
-        console.log(`✅ Perfil atualizado: ${email_novo}`);
-        return res.status(200).json({ message: "Perfil atualizado!", user: result.rows[0] });
+        await db.query(
+            'UPDATE public.produtores SET nome=$1, email=$2, foto_perfil=$3 WHERE email=$4', 
+            [nome, email_novo, foto_perfil, email_original]
+        );
+        return res.status(200).json({ message: "Perfil atualizado!" });
     } catch (err) {
-        console.error("❌ ERRO AO ATUALIZAR PERFIL:", err.message);
-        return res.status(500).json({ message: "Erro ao atualizar dados" });
+        return res.status(500).json({ message: "Erro ao atualizar perfil" });
     }
 };
