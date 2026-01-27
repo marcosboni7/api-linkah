@@ -3,10 +3,18 @@ const db = require('../config/database');
 // --- 1. CADASTRO DE PRODUTOR ---
 exports.registerProdutor = async (req, res) => {
     try {
-        const { nome, email, senha } = req.body;
+        // Aceita 'email' ou 'produtor_email' ou 'userEmail'
+        const nome = req.body.nome || req.body.name;
+        const email = req.body.email || req.body.produtor_email || req.body.userEmail;
+        const senha = req.body.senha || req.body.password;
+
+        console.log("📝 Tentativa de registro com:", { nome, email });
 
         if (!nome || !email || !senha) {
-            return res.status(400).json({ message: "Preencha todos os campos obrigatórios." });
+            return res.status(400).json({ 
+                message: "Preencha todos os campos obrigatórios.",
+                recebido: req.body // Isso ajuda a debugar o que chegou de fato
+            });
         }
 
         // Verifica se o e-mail já existe
@@ -16,17 +24,16 @@ exports.registerProdutor = async (req, res) => {
         }
 
         const query = `
-            INSERT INTO public.produtores (nome, email, senha, data_criacao)
-            VALUES ($1, $2, $3, NOW())
+            INSERT INTO public.produtores (nome, email, senha)
+            VALUES ($1, $2, $3)
             RETURNING id, nome, email;
         `;
         const result = await db.query(query, [nome, email, senha]);
 
-        console.log(`✅ Novo produtor cadastrado: ${email}`);
-        return res.status(201).json({ message: "Cadastro realizado com sucesso!", user: result.rows[0] });
+        return res.status(201).json({ message: "Cadastro realizado!", user: result.rows[0] });
     } catch (err) {
         console.error("❌ ERRO NO CADASTRO:", err.message);
-        return res.status(500).json({ message: "Erro ao cadastrar produtor" });
+        return res.status(500).json({ message: "Erro interno no servidor" });
     }
 };
 
