@@ -1,15 +1,26 @@
 const db = require('../config/database');
 
 // --- 1. LISTAR PARA VITRINE (SITE PÚBLICO) ---
+// --- LISTAR PARA VITRINE COM FILTRO DE CATEGORIA ---
 exports.listarTodosEventosParaVitrine = async (req, res) => {
   try {
-    const query = `
+    const { categoria } = req.query; // Pega a categoria da URL: ?categoria=Teatro
+    
+    let query = `
       SELECT id, nome, categoria, local_nome, cidade, estado, imagem_capa, data_inicio 
       FROM public.eventos 
-      WHERE status = 'Ativo' 
-      ORDER BY id DESC
+      WHERE status = 'Ativo'
     `;
-    const result = await db.query(query);
+    
+    const params = [];
+    if (categoria && categoria !== 'Todos') {
+      query += ` AND categoria = $1`;
+      params.push(categoria);
+    }
+
+    query += ` ORDER BY id DESC`;
+
+    const result = await db.query(query, params);
     const eventos = result.rows;
 
     for (let evento of eventos) {
@@ -22,8 +33,7 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
 
     return res.status(200).json(eventos);
   } catch (err) {
-    console.error("Erro na vitrine:", err.message);
-    return res.status(500).json({ error: "Erro interno", detalhe: err.message });
+    return res.status(500).json({ error: err.message });
   }
 };
 
