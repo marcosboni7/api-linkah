@@ -60,20 +60,22 @@ exports.salvarIngressos = async (req, res) => {
   }
 };
 
-// --- 3. LISTAR EVENTOS (AGORA COM INGRESSOS) ---
+// --- 3. LISTAR EVENTOS (COM INGRESSOS E SOMA TOTAL) ---
 exports.listarEventosPorProdutor = async (req, res) => {
   const { email } = req.query;
   try {
-    // 1. Busca os eventos
     const queryEventos = 'SELECT * FROM public.eventos WHERE produtor_email = $1 ORDER BY id DESC';
     const resultEventos = await db.query(queryEventos, [email]);
     const eventos = resultEventos.rows;
 
-    // 2. Para cada evento, busca seus respectivos ingressos
     for (let evento of eventos) {
       const queryIngressos = 'SELECT nome, preco, quantidade FROM public.ingressos WHERE evento_id = $1';
       const resultIng = await db.query(queryIngressos, [evento.id]);
-      evento.ingressos = resultIng.rows; // Adiciona a lista de ingressos dentro do objeto do evento
+      evento.ingressos = resultIng.rows;
+
+      // Lógica de Soma: Calcula o total de vagas baseada nos ingressos cadastrados
+      evento.total_vagas = evento.ingressos.reduce((acc, ing) => acc + (parseInt(ing.quantidade) || 0), 0);
+      evento.total_vendidos = 0; // Por enquanto zero até integrar as vendas
     }
 
     return res.status(200).json(eventos);
@@ -83,19 +85,15 @@ exports.listarEventosPorProdutor = async (req, res) => {
   }
 };
 
-// --- 4. BUSCAR POR ID (AGORA COM INGRESSOS) ---
+// --- 4. BUSCAR POR ID ---
 exports.buscarEventoPorId = async (req, res) => {
   const { id } = req.params;
   try {
     const query = 'SELECT * FROM public.eventos WHERE id = $1';
     const result = await db.query(query, [id]);
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Nao encontrado" });
-    }
+    if (result.rows.length === 0) return res.status(404).json({ message: "Nao encontrado" });
 
     const evento = result.rows[0];
-    // Busca os ingressos deste evento específico
     const queryIngressos = 'SELECT nome, preco, quantidade FROM public.ingressos WHERE evento_id = $1';
     const resultIng = await db.query(queryIngressos, [id]);
     evento.ingressos = resultIng.rows;
@@ -109,19 +107,9 @@ exports.buscarEventoPorId = async (req, res) => {
 // --- 5. ATUALIZAR EVENTO ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
-  const { 
-    nome, categoria, status, descricao, 
-    data_inicio, hora_inicio, local_nome, 
-    cidade, estado 
-  } = req.body;
+  const { nome, categoria, status, descricao, data_inicio, hora_inicio, local_nome, cidade, estado } = req.body;
   try {
-    const query = `
-      UPDATE public.eventos 
-      SET nome=$1, categoria=$2, status=$3, descricao=$4, 
-          data_inicio=$5, hora_inicio=$6, local_nome=$7, 
-          cidade=$8, estado=$9
-      WHERE id=$10
-    `;
+    const query = `UPDATE public.eventos SET nome=$1, categoria=$2, status=$3, descricao=$4, data_inicio=$5, hora_inicio=$6, local_nome=$7, cidade=$8, estado=$9 WHERE id=$10`;
     await db.query(query, [nome, categoria, status, descricao, data_inicio, hora_inicio, local_nome, cidade, estado, id]);
     return res.status(200).json({ message: "Atualizado" });
   } catch (err) {
@@ -133,9 +121,7 @@ exports.atualizarEvento = async (req, res) => {
 exports.excluirEvento = async (req, res) => {
   const { id } = req.params;
   try {
-    // Primeiro removemos os ingressos para evitar erro de chave estrangeira
     await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
-    // Depois removemos o evento
     await db.query('DELETE FROM public.eventos WHERE id = $1', [id]);
     return res.status(200).json({ message: "Removido" });
   } catch (err) {
@@ -151,7 +137,6 @@ exports.atualizarStatus = async (req, res) => {
     await db.query('UPDATE public.eventos SET status = $1 WHERE id = $2', [status, id]);
     return res.status(200).json({ message: "Status OK" });
   } catch (err) {
-    console.error("Erro status:", err.message);
     return res.status(500).json({ message: "Erro status" });
   }
 };
