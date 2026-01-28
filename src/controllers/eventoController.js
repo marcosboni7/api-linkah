@@ -3,25 +3,37 @@ const db = require('../config/database');
 // --- NOVA FUNÇÃO: LISTAR TUDO PARA A VITRINE ---
 exports.listarTodosEventosParaVitrine = async (req, res) => {
   try {
-    // 1. Busca simplificada para testar
-    const query = `SELECT * FROM public.eventos ORDER BY id DESC`;
+    // 1. Buscamos todos os eventos
+    // Nota: Use "imagem_capa" ou o nome EXATO que está na sua tabela
+    const query = 'SELECT * FROM public.eventos ORDER BY id DESC';
     const result = await db.query(query);
     const eventos = result.rows;
 
-    // 2. Busca o preço mínimo de forma segura
-    for (let evento of eventos) {
+    // 2. Buscamos o preço mínimo sem deixar o erro 500 acontecer
+    const eventosComPreco = await Promise.all(eventos.map(async (evento) => {
       try {
-        const resPreco = await db.query('SELECT MIN(preco) as min_p FROM public.ingressos WHERE evento_id = $1', [evento.id]);
-        evento.preco_minimo = resPreco.rows[0].min_p || 0;
-      } catch (e) {
-        evento.preco_minimo = 0; // Se der erro no ingresso, define 0 e não trava o site
+        const resPreco = await db.query(
+          'SELECT MIN(preco) as preco_minimo FROM public.ingressos WHERE evento_id = $1', 
+          [evento.id]
+        );
+        return {
+          ...evento,
+          preco_minimo: resPreco.rows[0].preco_minimo || 0
+        };
+      } catch (errIngresso) {
+        // Se a tabela de ingressos der erro, o evento ainda aparece com preço 0
+        return { ...evento, preco_minimo: 0 };
       }
-    }
+    }));
 
-    return res.status(200).json(eventos);
+    return res.status(200).json(eventosComPreco);
   } catch (err) {
-    console.error("ERRO DETALHADO NO BACKEND:", err.message);
-    return res.status(500).json({ error: err.message });
+    // Esse log vai aparecer lá no painel do Render em azul/preto
+    console.error("ERRO CRÍTICO NA VITRINE:", err.message);
+    return res.status(500).json({ 
+      error: "Erro interno no servidor", 
+      detalhe: err.message 
+    });
   }
 };
 
