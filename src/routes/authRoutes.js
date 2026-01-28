@@ -1,26 +1,34 @@
 const express = require('express');
 const router = express.Router();
-const eventoController = require('../controllers/eventoController');
-const OnlineController = require('../controllers/OnlineController');
+const authController = require('../controllers/authController');
 
-// --- ROTA PÚBLICA (PARA O SITE/VITRINE) ---
-// Esta é a rota que seu app/page.tsx vai chamar
-router.get('/vitrine', eventoController.listarTodosEventosParaVitrine);
+// --- 🔐 AUTENTICAÇÃO ---
 
-// --- EVENTOS ONLINE ---
-router.post('/novo-online', OnlineController.criarEventoOnline);
+// Rota de Cadastro Inicial 
+// Chama a função 'registerProdutor' no authController.js
+router.post('/register', authController.registerProdutor);
 
-// --- EVENTOS PRESENCIAIS ---
-router.post('/novo-presencial', eventoController.criarEventoPresencial);
+// Rota de Login 
+// Chama a função 'login' no authController.js
+router.post('/login', authController.login);
 
-// --- GERENCIAMENTO GERAL (Dashboard) ---
-router.get('/listar', eventoController.listarEventosPorProdutor);
-router.get('/:id', eventoController.buscarEventoPorId);
-router.put('/:id', eventoController.atualizarEvento);
-router.delete('/:id', eventoController.excluirEvento);
-router.put('/:id/status', eventoController.atualizarStatus);
 
-// --- INGRESSOS ---
-router.post('/:id/ingressos', eventoController.salvarIngressos);
+// --- 👤 GERENCIAMENTO DE PERFIL ---
+
+// Buscar os dados do produtor (GET) 
+// Chama a função 'getPerfil' no authController.js
+router.get('/perfil', authController.getPerfil); 
+
+// Atualizar os dados do produtor (PUT) 
+// Chama a função 'updatePerfil' no authController.js
+router.put('/perfil', authController.updatePerfil); 
+
+
+// --- 🛠️ MANUTENÇÃO (Opcional) ---
+
+// Caso precise testar se a rota de autenticação está viva
+router.get('/status', (req, res) => {
+    res.status(200).json({ message: "API de Autenticação Online" });
+});
 
 module.exports = router;
