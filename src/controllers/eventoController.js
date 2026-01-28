@@ -49,13 +49,18 @@ exports.listarEventosPorProdutor = async (req, res) => {
 
 // --- 3. CRIAR EVENTO PRESENCIAL ---
 exports.criarEventoPresencial = async (req, res) => {
+  let client;
   try {
+    // Usamos o pool para garantir que a conexão não "morra" no meio
     const {
       produtor_email, nome, categoria, status, descricao,
       data_inicio, hora_inicio, data_termino, hora_termino,
       local_nome, cep, endereco, numero, complemento,
       cidade, estado, imagem_capa 
     } = req.body;
+
+    // Log de segurança para ver se a data está bizarra
+    console.log("📅 Tentando criar evento para data:", data_inicio);
 
     const query = `
       INSERT INTO public.eventos (
@@ -70,15 +75,24 @@ exports.criarEventoPresencial = async (req, res) => {
 
     const values = [
       produtor_email, nome, categoria || 'Geral', status || 'Ativo', 
-      descricao, data_inicio, hora_inicio, data_termino, hora_termino,
+      descricao, 
+      data_inicio.substring(0, 10), // Força o formato YYYY-MM-DD
+      hora_inicio, 
+      data_termino.substring(0, 10), 
+      hora_termino,
       local_nome, cep, endereco, numero, complemento, cidade, estado, imagem_capa
     ];
 
     const result = await db.query(query, values);
+    console.log("✅ Evento criado com ID:", result.rows[0].id);
     return res.status(201).json({ id: result.rows[0].id });
+
   } catch (err) {
-    console.error("Erro ao criar presencial:", err.message);
-    return res.status(500).json({ error: err.message });
+    console.error("❌ ERRO CRÍTICO NO BANCO:", err.message);
+    return res.status(500).json({ 
+      error: "Erro ao salvar no banco de dados", 
+      detalhe: err.message 
+    });
   }
 };
 
