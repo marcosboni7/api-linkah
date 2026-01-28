@@ -60,30 +60,47 @@ exports.salvarIngressos = async (req, res) => {
   }
 };
 
-// --- 3. LISTAR EVENTOS (CORRIGIDO PARA O RENDER) ---
+// --- 3. LISTAR EVENTOS (AGORA COM INGRESSOS) ---
 exports.listarEventosPorProdutor = async (req, res) => {
   const { email } = req.query;
   try {
-    // Usando ORDER BY id para evitar erro caso a coluna criado_at nao exista
-    const query = 'SELECT * FROM public.eventos WHERE produtor_email = $1 ORDER BY id DESC';
-    const result = await db.query(query, [email]);
-    return res.status(200).json(result.rows);
+    // 1. Busca os eventos
+    const queryEventos = 'SELECT * FROM public.eventos WHERE produtor_email = $1 ORDER BY id DESC';
+    const resultEventos = await db.query(queryEventos, [email]);
+    const eventos = resultEventos.rows;
+
+    // 2. Para cada evento, busca seus respectivos ingressos
+    for (let evento of eventos) {
+      const queryIngressos = 'SELECT nome, preco, quantidade FROM public.ingressos WHERE evento_id = $1';
+      const resultIng = await db.query(queryIngressos, [evento.id]);
+      evento.ingressos = resultIng.rows; // Adiciona a lista de ingressos dentro do objeto do evento
+    }
+
+    return res.status(200).json(eventos);
   } catch (err) {
     console.error("Erro ao listar:", err.message);
     return res.status(500).json({ message: "Erro ao listar" });
   }
 };
 
-// --- 4. BUSCAR POR ID ---
+// --- 4. BUSCAR POR ID (AGORA COM INGRESSOS) ---
 exports.buscarEventoPorId = async (req, res) => {
   const { id } = req.params;
   try {
     const query = 'SELECT * FROM public.eventos WHERE id = $1';
     const result = await db.query(query, [id]);
+    
     if (result.rows.length === 0) {
       return res.status(404).json({ message: "Nao encontrado" });
     }
-    return res.status(200).json(result.rows[0]);
+
+    const evento = result.rows[0];
+    // Busca os ingressos deste evento específico
+    const queryIngressos = 'SELECT nome, preco, quantidade FROM public.ingressos WHERE evento_id = $1';
+    const resultIng = await db.query(queryIngressos, [id]);
+    evento.ingressos = resultIng.rows;
+
+    return res.status(200).json(evento);
   } catch (err) {
     return res.status(500).json({ message: "Erro ao buscar" });
   }
@@ -116,6 +133,9 @@ exports.atualizarEvento = async (req, res) => {
 exports.excluirEvento = async (req, res) => {
   const { id } = req.params;
   try {
+    // Primeiro removemos os ingressos para evitar erro de chave estrangeira
+    await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
+    // Depois removemos o evento
     await db.query('DELETE FROM public.eventos WHERE id = $1', [id]);
     return res.status(200).json({ message: "Removido" });
   } catch (err) {
