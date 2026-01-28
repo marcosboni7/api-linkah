@@ -61,6 +61,7 @@ exports.salvarIngressos = async (req, res) => {
 };
 
 // --- 3. LISTAR EVENTOS (COM INGRESSOS E SOMA TOTAL) ---
+// No seu eventoController.js (Backend)
 exports.listarEventosPorProdutor = async (req, res) => {
   const { email } = req.query;
   try {
@@ -73,18 +74,15 @@ exports.listarEventosPorProdutor = async (req, res) => {
       const resultIng = await db.query(queryIngressos, [evento.id]);
       evento.ingressos = resultIng.rows;
 
-      // Lógica de Soma: Calcula o total de vagas baseada nos ingressos cadastrados
+      // ESTA LINHA É A CHAVE: Soma a quantidade de todos os ingressos criados
       evento.total_vagas = evento.ingressos.reduce((acc, ing) => acc + (parseInt(ing.quantidade) || 0), 0);
-      evento.total_vendidos = 0; // Por enquanto zero até integrar as vendas
+      evento.total_vendidos = 0; 
     }
-
     return res.status(200).json(eventos);
   } catch (err) {
-    console.error("Erro ao listar:", err.message);
     return res.status(500).json({ message: "Erro ao listar" });
   }
 };
-
 // --- 4. BUSCAR POR ID ---
 exports.buscarEventoPorId = async (req, res) => {
   const { id } = req.params;
