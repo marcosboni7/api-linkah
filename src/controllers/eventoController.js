@@ -3,7 +3,6 @@ const db = require('../config/database');
 // --- 1. LISTAR PARA VITRINE (SITE PÚBLICO) ---
 exports.listarTodosEventosParaVitrine = async (req, res) => {
   try {
-    // Seleciona as colunas conforme seu CREATE TABLE
     const query = `
       SELECT id, nome, categoria, local_nome, cidade, estado, imagem_capa, data_inicio 
       FROM public.eventos 
@@ -13,7 +12,6 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
     const result = await db.query(query);
     const eventos = result.rows;
 
-    // Busca o menor preço para cada evento
     for (let evento of eventos) {
       const resPreco = await db.query(
         'SELECT MIN(preco) as min_p FROM public.ingressos WHERE evento_id = $1', 
@@ -44,11 +42,12 @@ exports.listarEventosPorProdutor = async (req, res) => {
     }
     return res.status(200).json(eventos);
   } catch (err) {
+    console.error("Erro ao listar:", err.message);
     return res.status(500).json({ message: "Erro ao listar" });
   }
 };
 
-// --- 3. CRIAR EVENTO ---
+// --- 3. CRIAR EVENTO PRESENCIAL ---
 exports.criarEventoPresencial = async (req, res) => {
   try {
     const {
@@ -78,11 +77,45 @@ exports.criarEventoPresencial = async (req, res) => {
     const result = await db.query(query, values);
     return res.status(201).json({ id: result.rows[0].id });
   } catch (err) {
+    console.error("Erro ao criar presencial:", err.message);
     return res.status(500).json({ error: err.message });
   }
 };
 
-// --- FUNÇÕES DE APOIO (STATUS, BUSCA, EXCLUIR) ---
+// --- 4. ATUALIZAR STATUS ---
+exports.atualizarStatus = async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  try {
+    await db.query('UPDATE public.eventos SET status = $1 WHERE id = $2', [status, id]);
+    return res.status(200).json({ message: "Status atualizado" });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// --- 5. ATUALIZAR EVENTO ---
+exports.atualizarEvento = async (req, res) => {
+  const { id } = req.params;
+  const campos = req.body;
+  try {
+    // Uma forma simples de update dinâmico (opcional) ou fixa:
+    const query = `
+      UPDATE public.eventos 
+      SET nome=$1, categoria=$2, descricao=$3, data_inicio=$4, local_nome=$5, imagem_capa=$6
+      WHERE id=$7
+    `;
+    await db.query(query, [
+      campos.nome, campos.categoria, campos.descricao, 
+      campos.data_inicio, campos.local_nome, campos.imagem_capa, id
+    ]);
+    return res.status(200).json({ message: "Evento atualizado" });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// --- 6. BUSCAR EVENTO POR ID ---
 exports.buscarEventoPorId = async (req, res) => {
   const { id } = req.params;
   try {
@@ -92,25 +125,39 @@ exports.buscarEventoPorId = async (req, res) => {
     const resIng = await db.query('SELECT * FROM public.ingressos WHERE evento_id = $1', [id]);
     evento.ingressos = resIng.rows;
     return res.status(200).json(evento);
-  } catch (err) { return res.status(500).json({ error: err.message }); }
+  } catch (err) { 
+    return res.status(500).json({ error: err.message }); 
+  }
 };
 
+// --- 7. EXCLUIR EVENTO ---
 exports.excluirEvento = async (req, res) => {
   const { id } = req.params;
   try {
     await db.query('DELETE FROM public.eventos WHERE id = $1', [id]);
     return res.status(200).json({ message: "Removido" });
-  } catch (err) { return res.status(500).json({ error: err.message }); }
+  } catch (err) { 
+    return res.status(500).json({ error: err.message }); 
+  }
 };
 
+// --- 8. SALVAR INGRESSOS ---
 exports.salvarIngressos = async (req, res) => {
   const { id } = req.params;
   const { ingressos } = req.body;
   try {
+    // Limpa ingressos antigos antes de salvar os novos se for uma atualização
+    // await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
+    
     for (const ing of ingressos) {
-      await db.query('INSERT INTO public.ingressos (evento_id, nome, preco, quantidade) VALUES ($1, $2, $3, $4)', 
-      [id, ing.nome, ing.preco || 0, ing.quantidade || 0]);
+      await db.query(
+        'INSERT INTO public.ingressos (evento_id, nome, preco, quantidade) VALUES ($1, $2, $3, $4)', 
+        [id, ing.nome, ing.preco || 0, ing.quantidade || 0]
+      );
     }
     return res.status(201).json({ message: "Salvo" });
-  } catch (err) { return res.status(500).json({ error: err.message }); }
+  } catch (err) { 
+    console.error("Erro ao salvar ingressos:", err.message);
+    return res.status(500).json({ error: err.message }); 
+  }
 };
