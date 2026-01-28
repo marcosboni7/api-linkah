@@ -3,25 +3,25 @@ const db = require('../config/database');
 // --- NOVA FUNÇÃO: LISTAR TUDO PARA A VITRINE ---
 exports.listarTodosEventosParaVitrine = async (req, res) => {
   try {
-    // Busca apenas eventos 'Ativo' para não mostrar rascunhos no site
-    const query = `SELECT id, nome, categoria, local_nome, cidade, estado, imagem_capa, data_inicio 
-                   FROM public.eventos 
-                   WHERE status = 'Ativo' 
-                   ORDER BY data_inicio ASC`;
+    // 1. Busca simplificada para testar
+    const query = `SELECT * FROM public.eventos ORDER BY id DESC`;
     const result = await db.query(query);
     const eventos = result.rows;
 
-    // Para cada evento, vamos buscar o menor preço de ingresso
+    // 2. Busca o preço mínimo de forma segura
     for (let evento of eventos) {
-      const queryPreco = 'SELECT MIN(preco) as preco_minimo FROM public.ingressos WHERE evento_id = $1';
-      const resultPreco = await db.query(queryPreco, [evento.id]);
-      evento.preco_minimo = resultPreco.rows[0].preco_minimo || 0;
+      try {
+        const resPreco = await db.query('SELECT MIN(preco) as min_p FROM public.ingressos WHERE evento_id = $1', [evento.id]);
+        evento.preco_minimo = resPreco.rows[0].min_p || 0;
+      } catch (e) {
+        evento.preco_minimo = 0; // Se der erro no ingresso, define 0 e não trava o site
+      }
     }
 
     return res.status(200).json(eventos);
   } catch (err) {
-    console.error("Erro vitrine:", err.message);
-    return res.status(500).json({ message: "Erro ao carregar vitrine" });
+    console.error("ERRO DETALHADO NO BACKEND:", err.message);
+    return res.status(500).json({ error: err.message });
   }
 };
 
