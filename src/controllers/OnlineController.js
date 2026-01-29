@@ -1,8 +1,12 @@
-const db = require('../config/database'); // Usando o mesmo caminho do seu authController
+const db = require('../config/database');
 
 exports.criarEventoOnline = async (req, res) => {
-    console.log("--- 🌐 Iniciando criação de Evento Online ---");
+    console.log("--- 🌐 Iniciando criação de Evento Online com Imagem ---");
     
+    // 1. Pegamos a imagem que vem do Multer (req.file)
+    // Se não houver arquivo, deixamos null ou uma string vazia
+    const imagem_capa = req.file ? `/uploads/${req.file.filename}` : null;
+
     const { 
         produtor_email, 
         nome, 
@@ -17,12 +21,12 @@ exports.criarEventoOnline = async (req, res) => {
         tipo 
     } = req.body;
 
-    // Verificação básica de segurança
     if (!produtor_email || !nome) {
         return res.status(400).json({ error: "E-mail do produtor e nome do evento são obrigatórios." });
     }
 
     try {
+        // 2. Adicionei 'imagem_capa' na Query
         const query = `
             INSERT INTO public.eventos (
                 produtor_email, 
@@ -35,11 +39,13 @@ exports.criarEventoOnline = async (req, res) => {
                 data_termino, 
                 hora_termino, 
                 status, 
-                tipo
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
+                tipo,
+                imagem_capa
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) 
             RETURNING id
         `;
 
+        // 3. Adicionei a variável imagem_capa no array de valores ($12)
         const values = [
             produtor_email, 
             nome, 
@@ -51,22 +57,22 @@ exports.criarEventoOnline = async (req, res) => {
             data_termino, 
             hora_termino, 
             status || 'Ativo', 
-            tipo || 'Online'
+            tipo || 'Online',
+            imagem_capa 
         ];
 
         const result = await db.query(query, values);
 
-        console.log(`✅ Evento Online criado com ID: ${result.rows[0].id}`);
+        console.log(`✅ Evento Online criado com ID: ${result.rows[0].id} e imagem salva.`);
 
         res.status(201).json({ 
             id: result.rows[0].id, 
-            message: "Evento Online registrado com sucesso!" 
+            message: "Evento Online registrado com sucesso!",
+            imagem: imagem_capa
         });
 
     } catch (err) {
-        // Esse console.log é vital para ler o erro real (ex: coluna faltando)
         console.error("❌ ERRO NO BANCO DE DADOS:", err.message);
-        
         res.status(500).json({ 
             error: "Erro ao salvar evento online.",
             detalhe: err.message 
