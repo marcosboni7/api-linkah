@@ -1,18 +1,9 @@
 const db = require('../config/database');
 
 exports.criarEventoOnline = async (req, res) => {
-    console.log("--- 🌐 Iniciando criação de Evento Online ---");
+    console.log("--- 🌐 Iniciando criação de Evento Online (Modo Base64) ---");
     
-    // LOGS DE DEBUG (Verifique isso no painel do Render)
-    console.log("DADOS TEXTUAIS (req.body):", req.body);
-    console.log("ARQUIVO RECEBIDO (req.file):", req.file);
-
-    // 1. Tratamento da Imagem
-    // Se o multer processou o arquivo, salvamos o caminho. 
-    // Caso contrário, fica null.
-    const imagem_capa = req.file ? `/uploads/${req.file.filename}` : null;
-
-    // 2. Desestruturação dos dados vindos do req.body
+    // Agora tudo vem do req.body, inclusive a imagem_capa
     const { 
         produtor_email, 
         nome, 
@@ -24,21 +15,22 @@ exports.criarEventoOnline = async (req, res) => {
         data_termino, 
         hora_termino, 
         status, 
-        tipo 
+        tipo,
+        imagem_capa // O texto Base64 enviado pelo Front-end
     } = req.body;
 
-    // 3. Validação Crítica
-    // O erro 400 acontece aqui se o Multer não conseguir ler o FormData
+    // Log para conferir o que está chegando
+    console.log("Recebido nome:", nome);
+    console.log("Possui imagem?", imagem_capa ? "Sim (Base64)" : "Não");
+
+    // Validação
     if (!produtor_email || !nome) {
-        console.error("❌ VALIDAÇÃO FALHOU: E-mail ou Nome ausentes.");
         return res.status(400).json({ 
-            error: "E-mail do produtor e nome do evento são obrigatórios.",
-            recebido: { produtor_email, nome } // Retorna o que o servidor "entendeu"
+            error: "E-mail do produtor e nome do evento são obrigatórios." 
         });
     }
 
     try {
-        // 4. Query SQL
         const query = `
             INSERT INTO public.eventos (
                 produtor_email, 
@@ -57,7 +49,6 @@ exports.criarEventoOnline = async (req, res) => {
             RETURNING id
         `;
 
-        // 5. Mapeamento de Valores
         const values = [
             produtor_email, 
             nome, 
@@ -70,7 +61,7 @@ exports.criarEventoOnline = async (req, res) => {
             hora_termino || null, 
             status || 'Ativo', 
             tipo || 'Online',
-            imagem_capa 
+            imagem_capa // Salvando o texto gigante diretamente na coluna TEXT
         ];
 
         const result = await db.query(query, values);
@@ -79,14 +70,13 @@ exports.criarEventoOnline = async (req, res) => {
 
         res.status(201).json({ 
             id: result.rows[0].id, 
-            message: "Evento Online registrado com sucesso!",
-            imagem: imagem_capa
+            message: "Evento Online registrado com sucesso!" 
         });
 
     } catch (err) {
         console.error("❌ ERRO NO BANCO DE DADOS:", err.message);
         res.status(500).json({ 
-            error: "Erro ao salvar evento online no banco de dados.",
+            error: "Erro ao salvar evento online.",
             detalhe: err.message 
         });
     }
