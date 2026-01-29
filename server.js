@@ -33,7 +33,7 @@ app.use(cors({
 
 app.use(helmet({ contentSecurityPolicy: false }));
 
-// --- AJUSTE DE LIMITE AQUI (Aumentado para 50mb) ---
+// Ajuste de limite para suportar imagens Base64 grandes
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -42,6 +42,7 @@ const inicializarBanco = async () => {
   try {
     console.log('⏳ Sincronizando tabelas com o banco de dados...');
 
+    // Criação das tabelas (com a correção do campo 'complemento')
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.produtores (
         email VARCHAR(255) PRIMARY KEY,
@@ -81,7 +82,7 @@ const inicializarBanco = async () => {
         cep VARCHAR(20),
         endereco VARCHAR(255),
         numero VARCHAR(20),
-        complement VARCHAR(255),
+        complemento VARCHAR(255),
         cidade VARCHAR(100),
         estado VARCHAR(50),
         imagem_capa TEXT,
@@ -109,6 +110,12 @@ const inicializarBanco = async () => {
       );
     `);
 
+    // Comando extra para garantir colunas em tabelas já existentes
+    await db.query(`
+      ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS imagem_capa TEXT;
+      ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS link_transmissao TEXT;
+    `);
+
     console.log('✅ Estrutura do banco de dados verificada!');
   } catch (err) {
     console.error('❌ ERRO NA INICIALIZAÇÃO:', err.message);
@@ -119,7 +126,7 @@ const inicializarBanco = async () => {
 app.use((req, res, next) => {
   if (['POST', 'PUT'].includes(req.method)) {
     const bodyLog = { ...req.body };
-    // Oculta o Base64 do log para não travar o console do Render
+    // Oculta strings Base64 pesadas dos logs do Render para evitar lentidão
     if (bodyLog.foto_perfil) bodyLog.foto_perfil = "BASE64_OMITIDA";
     if (bodyLog.imagem_capa) bodyLog.imagem_capa = "BASE64_OMITIDA";
     console.log(`📥 [${req.method}] ${req.url}:`, JSON.stringify(bodyLog));
