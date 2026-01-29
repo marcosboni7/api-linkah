@@ -6,7 +6,7 @@ const helmet = require('helmet');
 // CAMINHOS
 const authRoutes = require('./src/routes/authRoutes');
 const eventoRoutes = require('./src/routes/eventoRoutes'); 
-const compraRoutes = require('./src/routes/compraRoutes'); // Importação adicionada aqui
+const compraRoutes = require('./src/routes/compraRoutes'); 
 const db = require('./src/config/database'); 
 
 const app = express();
@@ -32,8 +32,10 @@ app.use(cors({
 }));
 
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(express.json({ limit: '15mb' }));
-app.use(express.urlencoded({ limit: '15mb', extended: true }));
+
+// --- AJUSTE DE LIMITE AQUI (Aumentado para 50mb) ---
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // --- 2. FUNÇÃO DE INICIALIZAÇÃO DO BANCO ---
 const inicializarBanco = async () => {
@@ -79,7 +81,7 @@ const inicializarBanco = async () => {
         cep VARCHAR(20),
         endereco VARCHAR(255),
         numero VARCHAR(20),
-        complement spacing VARCHAR(255),
+        complement VARCHAR(255),
         cidade VARCHAR(100),
         estado VARCHAR(50),
         imagem_capa TEXT,
@@ -94,7 +96,6 @@ const inicializarBanco = async () => {
         quantidade INTEGER DEFAULT 0
       );
 
-      -- NOVA TABELA DE COMPRAS ADICIONADA AQUI
       CREATE TABLE IF NOT EXISTS public.compras (
         id SERIAL PRIMARY KEY,
         usuario_email VARCHAR(255) NOT NULL,
@@ -118,6 +119,7 @@ const inicializarBanco = async () => {
 app.use((req, res, next) => {
   if (['POST', 'PUT'].includes(req.method)) {
     const bodyLog = { ...req.body };
+    // Oculta o Base64 do log para não travar o console do Render
     if (bodyLog.foto_perfil) bodyLog.foto_perfil = "BASE64_OMITIDA";
     if (bodyLog.imagem_capa) bodyLog.imagem_capa = "BASE64_OMITIDA";
     console.log(`📥 [${req.method}] ${req.url}:`, JSON.stringify(bodyLog));
@@ -128,7 +130,7 @@ app.use((req, res, next) => {
 // --- 4. ROTAS ---
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
-app.use('/api/compras', compraRoutes); // Ativando a rota de compras
+app.use('/api/compras', compraRoutes);
 
 app.get('/ping', (req, res) => res.status(200).send('Linkah API Online 🚀'));
 
