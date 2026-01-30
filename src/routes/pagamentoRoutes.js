@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const pagamentoController = require('../controllers/pagamentoController');
-// Se você tiver um middleware de auth, coloque aqui
-const authMiddleware = require('../middlewares/authMiddleware'); 
+
+// Removido o authMiddleware que estava causando erro de "Módulo não encontrado"
+// A autenticação agora será baseada no e-mail enviado pelo frontend no corpo da requisição
 
 router.post('/checkout', pagamentoController.criarSessaoCheckout);
 
