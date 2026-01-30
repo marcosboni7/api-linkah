@@ -1,13 +1,12 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-// Importe seu modelo de Ingressos/Pedidos para salvar no banco
-const Ingresso = require('../models/Ingresso'); 
+const db = require('../config/database'); 
 
 exports.ouvirStripe = async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
   try {
-    // Verifica se o evento realmente veio do Stripe (Segurança)
+    // Verifica a assinatura do Stripe
     event = stripe.webhooks.constructEvent(
       req.body, 
       sig, 
@@ -18,22 +17,32 @@ exports.ouvirStripe = async (req, res) => {
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  // Lógica quando o pagamento é confirmado
+  // Quando o pagamento é confirmado
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
 
-    // Aqui você integra com seu banco de dados
-    console.log(`✅ Pagamento aprovado para o e-mail: ${session.customer_email}`);
+    console.log(`✅ Pagamento aprovado para: ${session.metadata.usuarioEmail}`);
     
-    // Exemplo: Criar o ingresso no banco
-    await Ingresso.create({
-      eventoId: session.metadata.eventoId,
-      usuarioEmail: session.customer_email,
-      status: 'pago',
-      stripeSessionId: session.id
-    });
+    try {
+      // SALVAR NO SEU BANCO DE DADOS (public.compras)
+      const query = `
+        INSERT INTO public.compras (usuario_email, evento_id, quantidade, status, stripe_session_id)
+        VALUES ($1, $2, $3, $4, $5)
+      `;
+
+      await db.query(query, [
+        session.metadata.usuarioEmail,
+        session.metadata.eventoId,
+        session.metadata.quantidade,
+        'pago',
+        session.id
+      ]);
+
+      console.log('✨ Compra registrada no banco com sucesso!');
+    } catch (dbErr) {
+      console.error('❌ Erro ao salvar compra no banco:', dbErr.message);
+    }
   }
 
-  // Responde ao Stripe que recebeu o aviso
   res.json({ received: true });
 };
