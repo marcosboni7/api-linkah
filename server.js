@@ -7,11 +7,13 @@ const helmet = require('helmet');
 const authRoutes = require('./src/routes/authRoutes');
 const eventoRoutes = require('./src/routes/eventoRoutes'); 
 const compraRoutes = require('./src/routes/compraRoutes'); 
+const pagamentoRoutes = require('./src/routes/pagamentoRoutes'); // Nova rota
+const webhookController = require('./src/controllers/webhookController'); // Novo controller
 const db = require('./src/config/database'); 
 
 const app = express();
 
-// --- 1. MIDDLEWARES ---
+// --- 1. MIDDLEWARES DE SEGURANÇA E CORS ---
 const allowedOrigins = [
   'https://linkah-frontend-ivory.vercel.app',
   'https://linkah.com.br',
@@ -33,16 +35,22 @@ app.use(cors({
 
 app.use(helmet({ contentSecurityPolicy: false }));
 
-// Ajuste de limite para suportar imagens Base64 grandes
+// --- 2. ROTA DE WEBHOOK (CRÍTICO: DEVE VIR ANTES DO JSON PARSER) ---
+// O Stripe precisa do body em formato "raw" para verificar a assinatura
+app.post(
+  '/api/pagamentos/webhook', 
+  express.raw({ type: 'application/json' }), 
+  webhookController.ouvirStripe
+);
+
+// --- 3. PARSERS JSON (APLICADOS APÓS O WEBHOOK) ---
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// --- 2. FUNÇÃO DE INICIALIZAÇÃO DO BANCO ---
+// --- 4. INICIALIZAÇÃO DO BANCO ---
 const inicializarBanco = async () => {
   try {
     console.log('⏳ Sincronizando tabelas com o banco de dados...');
-
-    // Criação das tabelas (com a correção do campo 'complemento')
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.produtores (
         email VARCHAR(255) PRIMARY KEY,
@@ -105,15 +113,16 @@ const inicializarBanco = async () => {
         data_evento DATE,
         quantidade INTEGER NOT NULL,
         valor_total DECIMAL(10,2),
-        status VARCHAR(50) DEFAULT 'Aprovado',
+        status VARCHAR(50) DEFAULT 'Pendente',
+        stripe_session_id VARCHAR(255),
         criado_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
-    // Comando extra para garantir colunas em tabelas já existentes
+    // Garantir colunas essenciais para o Stripe
     await db.query(`
+      ALTER TABLE public.compras ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255);
       ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS imagem_capa TEXT;
-      ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS link_transmissao TEXT;
     `);
 
     console.log('✅ Estrutura do banco de dados verificada!');
@@ -122,11 +131,10 @@ const inicializarBanco = async () => {
   }
 };
 
-// --- 3. MONITORAMENTO ---
+// --- 5. MONITORAMENTO ---
 app.use((req, res, next) => {
-  if (['POST', 'PUT'].includes(req.method)) {
+  if (['POST', 'PUT'].includes(req.method) && req.url !== '/api/pagamentos/webhook') {
     const bodyLog = { ...req.body };
-    // Oculta strings Base64 pesadas dos logs do Render para evitar lentidão
     if (bodyLog.foto_perfil) bodyLog.foto_perfil = "BASE64_OMITIDA";
     if (bodyLog.imagem_capa) bodyLog.imagem_capa = "BASE64_OMITIDA";
     console.log(`📥 [${req.method}] ${req.url}:`, JSON.stringify(bodyLog));
@@ -134,14 +142,15 @@ app.use((req, res, next) => {
   next();
 });
 
-// --- 4. ROTAS ---
+// --- 6. ROTAS DA API ---
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 app.use('/api/compras', compraRoutes);
+app.use('/api/pagamentos', pagamentoRoutes); // Nova rota de checkout
 
 app.get('/ping', (req, res) => res.status(200).send('Linkah API Online 🚀'));
 
-// --- 5. START ---
+// --- 7. START ---
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, async () => {
   console.log(`🚀 Servidor rodando na porta: ${PORT}`);
