@@ -1,5 +1,7 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const db = require('../config/database'); 
+const path = require('path');
+// Usamos path.join para evitar erros de caminho no Linux/Render
+const db = require(path.join(__dirname, '../config/database'));
 
 exports.ouvirStripe = async (req, res) => {
   const sig = req.headers['stripe-signature'];
