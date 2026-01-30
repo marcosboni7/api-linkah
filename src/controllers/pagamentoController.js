@@ -4,15 +4,14 @@ exports.criarSessaoCheckout = async (req, res) => {
   try {
     const { evento, usuarioEmail, quantidade } = req.body;
 
-    // Validação de segurança: evita erro 500 se o frontend mandar dados vazios
-    if (!evento || !evento.preco) {
-      return res.status(400).json({ error: "Dados do evento inválidos ou preço ausente." });
-    }
+    // Log para você conferir no Render se os dados chegaram
+    console.log("Iniciando checkout para:", evento.titulo);
 
     const session = await stripe.checkout.sessions.create({
-      automatic_payment_methods: {
-        enabled: true,
-      },
+      // Como seu SDK é antigo, voltamos para a lista manual
+      // ATENÇÃO: Se o Pix der erro de "método inválido", remova o 'pix' da lista abaixo
+      // até que a conta do seu cliente seja aprovada no painel.
+      payment_method_types: ['card', 'pix'], 
       line_items: [
         {
           price_data: {
@@ -20,6 +19,7 @@ exports.criarSessaoCheckout = async (req, res) => {
             product_data: {
               name: evento.titulo || "Ingresso",
             },
+            // Convertendo 0.8 para 80 centavos corretamente
             unit_amount: Math.round(parseFloat(evento.preco) * 100),
           },
           quantity: parseInt(quantidade) || 1,
@@ -38,9 +38,7 @@ exports.criarSessaoCheckout = async (req, res) => {
     res.json({ id: session.id });
 
   } catch (err) {
-    // Isso vai imprimir o erro real no console do Render para você ler
-    console.error("ERRO DETALHADO DO STRIPE:", err);
-    
+    console.error("ERRO NO STRIPE:", err.message);
     res.status(500).json({ 
       error: "Erro ao processar pagamento", 
       details: err.message 
