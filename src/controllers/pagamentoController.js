@@ -4,47 +4,43 @@ exports.criarSessaoCheckout = async (req, res) => {
   try {
     const { evento, usuarioEmail, quantidade } = req.body;
 
-    // Criamos a sessão de checkout
+    // Validação de segurança: evita erro 500 se o frontend mandar dados vazios
+    if (!evento || !evento.preco) {
+      return res.status(400).json({ error: "Dados do evento inválidos ou preço ausente." });
+    }
+
     const session = await stripe.checkout.sessions.create({
-      // ✅ MELHOR PRÁTICA: O Stripe gerencia os métodos ativos (Pix/Cartão)
-      // Isso evita o erro 400 enquanto a conta do cliente está "em análise"
       automatic_payment_methods: {
         enabled: true,
       },
-      
       line_items: [
         {
           price_data: {
             currency: 'brl',
             product_data: {
-              name: evento.titulo,
+              name: evento.titulo || "Ingresso",
             },
-            unit_amount: Math.round(evento.preco * 100), // Preço em centavos
+            unit_amount: Math.round(parseFloat(evento.preco) * 100),
           },
-          quantity: quantidade,
+          quantity: parseInt(quantidade) || 1,
         },
       ],
       mode: 'payment',
-      
-      // URLs de redirecionamento na Vercel
       success_url: `https://linkah-frontend-ivory.vercel.app/pagamento/sucesso?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `https://linkah-frontend-ivory.vercel.app/checkout?eventoId=${evento.id}`,
-      
-      // Dados extras para você identificar a venda no Webhook depois
       metadata: {
-        usuarioEmail: usuarioEmail,
-        eventoId: evento.id.toString(),
-        quantidade: quantidade.toString(),
+        usuarioEmail: usuarioEmail || "nao_informado",
+        eventoId: evento.id ? evento.id.toString() : "0",
+        quantidade: quantidade ? quantidade.toString() : "1",
       },
     });
 
-    // Retorna o ID da sessão para o frontend redirecionar
     res.json({ id: session.id });
 
   } catch (err) {
-    console.error("Erro ao criar sessão do Stripe:", err);
+    // Isso vai imprimir o erro real no console do Render para você ler
+    console.error("ERRO DETALHADO DO STRIPE:", err);
     
-    // Retorna o erro detalhado para ajudar no debug
     res.status(500).json({ 
       error: "Erro ao processar pagamento", 
       details: err.message 
