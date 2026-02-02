@@ -7,8 +7,9 @@ const helmet = require('helmet');
 const authRoutes = require('./src/routes/authRoutes');
 const eventoRoutes = require('./src/routes/eventoRoutes'); 
 const compraRoutes = require('./src/routes/compraRoutes'); 
-const pagamentoRoutes = require('./src/routes/pagamentoRoutes'); // Nova rota
-const webhookController = require('./src/controllers/webhookController'); // Novo controller
+const pagamentoRoutes = require('./src/routes/pagamentoRoutes'); 
+const comunidadeRoutes = require('./src/routes/comunidadeRoutes'); // Rota da Comunidade
+const webhookController = require('./src/controllers/webhookController'); 
 const db = require('./src/config/database'); 
 
 const app = express();
@@ -36,14 +37,13 @@ app.use(cors({
 app.use(helmet({ contentSecurityPolicy: false }));
 
 // --- 2. ROTA DE WEBHOOK (CRÍTICO: DEVE VIR ANTES DO JSON PARSER) ---
-// O Stripe precisa do body em formato "raw" para verificar a assinatura
 app.post(
   '/api/pagamentos/webhook', 
   express.raw({ type: 'application/json' }), 
   webhookController.ouvirStripe
 );
 
-// --- 3. PARSERS JSON (APLICADOS APÓS O WEBHOOK) ---
+// --- 3. PARSERS JSON ---
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -51,6 +51,8 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 const inicializarBanco = async () => {
   try {
     console.log('⏳ Sincronizando tabelas com o banco de dados...');
+    
+    // TABELAS EXISTENTES + NOVAS TABELAS DE COMUNIDADE
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.produtores (
         email VARCHAR(255) PRIMARY KEY,
@@ -117,12 +119,23 @@ const inicializarBanco = async () => {
         stripe_session_id VARCHAR(255),
         criado_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
 
-    // Garantir colunas essenciais para o Stripe
-    await db.query(`
-      ALTER TABLE public.compras ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255);
-      ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS imagem_capa TEXT;
+      /* NOVA TABELA: USUÁRIOS QUE SÓ USAM O CHAT */
+      CREATE TABLE IF NOT EXISTS public.usuarios_comunidade (
+        id SERIAL PRIMARY KEY,
+        nome VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE,
+        data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      /* NOVA TABELA: MENSAGENS DO CHAT */
+      CREATE TABLE IF NOT EXISTS public.mensagens (
+        id SERIAL PRIMARY KEY,
+        evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE,
+        usuario_nome VARCHAR(255) NOT NULL,
+        texto TEXT NOT NULL,
+        criado_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
     console.log('✅ Estrutura do banco de dados verificada!');
@@ -146,7 +159,8 @@ app.use((req, res, next) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 app.use('/api/compras', compraRoutes);
-app.use('/api/pagamentos', pagamentoRoutes); // Nova rota de checkout
+app.use('/api/pagamentos', pagamentoRoutes);
+app.use('/api/comunidade', comunidadeRoutes); // Ativando rota da comunidade
 
 app.get('/ping', (req, res) => res.status(200).send('Linkah API Online 🚀'));
 
