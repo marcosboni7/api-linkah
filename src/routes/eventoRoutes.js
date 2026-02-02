@@ -3,11 +3,14 @@ const router = express.Router();
 const eventoController = require('../controllers/eventoController');
 const OnlineController = require('../controllers/OnlineController');
 
-// Vitrine (Público)
+// --- ROTA RAIZ (Acessada via /api/eventos) ---
+// Adicionamos esta linha para o fetch do frontend funcionar direto
+router.get('/', eventoController.listarTodosEventosParaVitrine);
+
+// Vitrine (Público) - Mantida para compatibilidade
 router.get('/vitrine', eventoController.listarTodosEventosParaVitrine);
 
 // --- 2. ROTAS DE CRIAÇÃO (SEM MULTER) ---
-// Agora elas recebem JSON direto, salvando o Base64 no banco de dados.
 router.post('/novo-online', OnlineController.criarEventoOnline);
 router.post('/novo-presencial', eventoController.criarEventoPresencial);
 
