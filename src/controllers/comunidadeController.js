@@ -5,10 +5,10 @@ exports.enviarMensagem = async (req, res) => {
   try {
     const { evento_id, usuario_nome, texto } = req.body;
     
-    // Garantimos que o ID seja um número inteiro para o banco 🔢
+    // Garantimos que o ID seja um número inteiro puro 🔢
     const idLimpo = parseInt(evento_id);
 
-    console.log(`--- POST: Tentando gravar na mensagens_v2 para o evento ${idLimpo} ---`);
+    console.log(`--- POST: Gravando na mensagens_v2 para o evento ${idLimpo} ---`);
 
     const result = await db.query(
       `INSERT INTO public.mensagens_v2 (evento_id, usuario_nome, texto, criado_em) 
@@ -17,11 +17,11 @@ exports.enviarMensagem = async (req, res) => {
       [idLimpo, usuario_nome, texto]
     );
 
-    console.log("✅ Mensagem gravada com sucesso:", result.rows[0]);
+    console.log("✅ Mensagem salva:", result.rows[0]);
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    console.error("❌ Erro ao salvar mensagem:", err.message);
-    res.status(500).json({ error: "Erro interno ao salvar a mensagem." });
+    console.error("❌ Erro no POST:", err.message);
+    res.status(500).json({ error: err.message });
   }
 };
 
@@ -33,7 +33,7 @@ exports.listarMensagensPorEvento = async (req, res) => {
 
     console.log(`--- GET: Buscando mensagens_v2 para o evento ${idLimpo} ---`);
 
-    // Buscamos na tabela v2 e ordenamos pela data de criação ⏱️
+    // Buscamos as mensagens ordenadas pelo tempo de criação ⏱️
     const result = await db.query(
       `SELECT * FROM public.mensagens_v2 
        WHERE evento_id = $1 
@@ -41,10 +41,10 @@ exports.listarMensagensPorEvento = async (req, res) => {
       [idLimpo]
     );
 
-    console.log(`📊 Banco retornou ${result.rowCount} mensagens.`);
+    console.log(`📊 Resultado: ${result.rowCount} mensagens encontradas.`);
     res.json(result.rows);
   } catch (err) {
-    console.error("❌ Erro ao buscar mensagens:", err.message);
-    res.status(500).json({ error: "Erro interno ao carregar as mensagens." });
+    console.error("❌ Erro no GET:", err.message);
+    res.status(500).json({ error: err.message });
   }
 };
