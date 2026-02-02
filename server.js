@@ -5,12 +5,12 @@ const helmet = require('helmet');
 
 // CAMINHOS
 const authRoutes = require('./src/routes/authRoutes');
-const eventoRoutes = require('./src/routes/eventoRoutes'); 
-const compraRoutes = require('./src/routes/compraRoutes'); 
-const pagamentoRoutes = require('./src/routes/pagamentoRoutes'); 
-const comunidadeRoutes = require('./src/routes/comunidadeRoutes'); // Rota da Comunidade
-const webhookController = require('./src/controllers/webhookController'); 
-const db = require('./src/config/database'); 
+const eventoRoutes = require('./src/routes/eventoRoutes');
+const compraRoutes = require('./src/routes/compraRoutes');
+const pagamentoRoutes = require('./src/routes/pagamentoRoutes');
+const comunidadeRoutes = require('./src/routes/comunidadeRoutes');
+const webhookController = require('./src/controllers/webhookController');
+const db = require('./src/config/database');
 
 const app = express();
 
@@ -36,10 +36,10 @@ app.use(cors({
 
 app.use(helmet({ contentSecurityPolicy: false }));
 
-// --- 2. ROTA DE WEBHOOK (CRÍTICO: DEVE VIR ANTES DO JSON PARSER) ---
+// --- 2. ROTA DE WEBHOOK (DEVE VIR ANTES DO JSON PARSER) ---
 app.post(
-  '/api/pagamentos/webhook', 
-  express.raw({ type: 'application/json' }), 
+  '/api/pagamentos/webhook',
+  express.raw({ type: 'application/json' }),
   webhookController.ouvirStripe
 );
 
@@ -51,8 +51,7 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 const inicializarBanco = async () => {
   try {
     console.log('⏳ Sincronizando tabelas com o banco de dados...');
-    
-    // TABELAS EXISTENTES + NOVAS TABELAS DE COMUNIDADE
+
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.produtores (
         email VARCHAR(255) PRIMARY KEY,
@@ -63,7 +62,7 @@ const inicializarBanco = async () => {
         telefone VARCHAR(20),
         data_nascimento DATE,
         cep VARCHAR(20),
-        rua VARCHAR(255),
+        ruu VARCHAR(255),
         numero VARCHAR(20),
         bairro VARCHAR(100),
         estado VARCHAR(50),
@@ -120,21 +119,13 @@ const inicializarBanco = async () => {
         criado_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-      /* NOVA TABELA: USUÁRIOS QUE SÓ USAM O CHAT */
-      CREATE TABLE IF NOT EXISTS public.usuarios_comunidade (
-        id SERIAL PRIMARY KEY,
-        nome VARCHAR(255) NOT NULL,
-        email VARCHAR(255) UNIQUE,
-        data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      /* NOVA TABELA: MENSAGENS DO CHAT */
-      CREATE TABLE IF NOT EXISTS public.mensagens (
+      /* TABELA DE MENSAGENS V2 - PARA CORRIGIR CONFLITOS */
+      CREATE TABLE IF NOT EXISTS public.mensagens_v2 (
         id SERIAL PRIMARY KEY,
         evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE,
         usuario_nome VARCHAR(255) NOT NULL,
         texto TEXT NOT NULL,
-        criado_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP 
       );
     `);
 
@@ -160,7 +151,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 app.use('/api/compras', compraRoutes);
 app.use('/api/pagamentos', pagamentoRoutes);
-app.use('/api/comunidade', comunidadeRoutes); // Ativando rota da comunidade
+app.use('/api/comunidade', comunidadeRoutes);
 
 app.get('/ping', (req, res) => res.status(200).send('Linkah API Online 🚀'));
 
