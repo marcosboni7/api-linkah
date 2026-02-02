@@ -5,10 +5,8 @@ exports.enviarMensagem = async (req, res) => {
     const { evento_id, usuario_nome, texto } = req.body;
     const idLimpo = parseInt(evento_id);
 
-    console.log(`--- INÍCIO ENVIO ---`);
-    console.log(`Tentando inserir: Evento ${idLimpo}, Usuário ${usuario_nome}`);
+    console.log(`--- TENTATIVA DE GRAVAÇÃO: Evento ${idLimpo} ---`);
 
-    // Usamos o RETURNING * para forçar o Postgres a confirmar a gravação
     const result = await db.query(
       `INSERT INTO public.mensagens (evento_id, usuario_nome, texto, criado_at) 
        VALUES ($1, $2, $3, NOW()) 
@@ -16,13 +14,11 @@ exports.enviarMensagem = async (req, res) => {
       [idLimpo, usuario_nome, texto]
     );
 
-    console.log(`✅ Sucesso! ID da nova mensagem: ${result.rows[0].id}`);
-    console.log(`--- FIM ENVIO ---`);
-    
-    res.status(201).json(result.rows[0]);
+    console.log("✅ MSG GRAVADA COM SUCESSO NO POSTGRES:", result.rows[0]);
+    return res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error("❌ ERRO NO INSERT:", err.message);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 };
 
@@ -31,8 +27,6 @@ exports.listarMensagensPorEvento = async (req, res) => {
     const { evento_id } = req.params;
     const idLimpo = parseInt(evento_id);
 
-    console.log(`🔍 Buscando mensagens para o evento: ${idLimpo}`);
-
     const result = await db.query(
       `SELECT * FROM public.mensagens 
        WHERE evento_id = $1 
@@ -40,10 +34,10 @@ exports.listarMensagensPorEvento = async (req, res) => {
       [idLimpo]
     );
 
-    console.log(`📊 Total de mensagens encontradas no banco: ${result.rowCount}`);
-    res.json(result.rows);
+    console.log(`🔍 Busca para ID ${idLimpo} retornou ${result.rowCount} linhas.`);
+    return res.json(result.rows);
   } catch (err) {
     console.error("❌ ERRO NO SELECT:", err.message);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 };
