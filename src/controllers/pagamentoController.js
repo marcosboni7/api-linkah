@@ -132,3 +132,25 @@ exports.webhookStripe = async (req, res) => {
 
     res.status(200).json({ received: true });
 };
+
+// --- 3. NOVA FUNÇÃO: BUSCAR DETALHES PARA A TELA DE SUCESSO ---
+// Essa função responde ao Front-end com os dados que estão no banco
+exports.buscarDetalhesCompra = async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        
+        const result = await db.query(
+            "SELECT * FROM public.compras WHERE stripe_session_id = $1", 
+            [sessionId]
+        );
+
+        if (result.rows.length > 0) {
+            res.json(result.rows[0]);
+        } else {
+            res.status(404).json({ error: "Compra não encontrada." });
+        }
+    } catch (err) {
+        console.error("❌ Erro ao buscar detalhes:", err.message);
+        res.status(500).json({ error: "Erro interno no servidor." });
+    }
+};
