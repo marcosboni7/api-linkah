@@ -1,18 +1,19 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const nodemailer = require('nodemailer');
 
-// Configuração do Transportador de E-mail (Exemplo para Gmail/Outlook)
+// 1. CONFIGURAÇÃO DO TRANSPORTADOR DE E-MAIL (GMAIL)
+// Usando as variáveis GMAIL_USER e GMAIL_PASS que você configurou no Render
 const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+  host: 'smtp.gmail.com',
   port: 587,
-  secure: false,
+  secure: false, // true para 465, false para 587
   auth: {
-    user: process.env.EMAIL_USER, // Seu e-mail (ex: contato@linkah.com)
-    pass: process.env.EMAIL_PASS, // Sua senha de app
+    user: process.env.GMAIL_USER, // marcosphara@gmail.com
+    pass: process.env.GMAIL_PASS, // kytyrxzjlgsxqvjq (Senha de App)
   },
 });
 
-// --- 1. FUNÇÃO DE CRIAÇÃO DA SESSÃO (CHECKOUT) ---
+// --- 2. FUNÇÃO DE CRIAÇÃO DA SESSÃO (CHECKOUT) ---
 exports.criarSessaoCheckout = async (req, res) => {
   console.log("--- 📥 NOVA REQUISIÇÃO DE CHECKOUT (DIVISÃO DE TAXA) ---");
   try {
@@ -50,7 +51,7 @@ exports.criarSessaoCheckout = async (req, res) => {
       mode: 'payment',
       customer_email: usuarioEmail,
 
-      // O METADATA envia dados ocultos para o Webhook ler depois
+      // METADATA: Carrega as informações para o Webhook ler depois
       metadata: {
         eventoId: evento.id,
         quantidade: quantidade,
@@ -58,11 +59,11 @@ exports.criarSessaoCheckout = async (req, res) => {
         tituloEvento: evento.titulo
       },
 
-      // CONFIGURAÇÃO DO STRIPE CONNECT (SPLIT)
+      // CONFIGURAÇÃO DO STRIPE CONNECT (DIVISÃO DE VALORES)
       payment_intent_data: {
-        application_fee_amount: applicationFeeCentavos,
+        application_fee_amount: applicationFeeCentavos, // Sua comissão (10%)
         transfer_data: {
-          destination: stripeAccountId,
+          destination: stripeAccountId, // Parte do Victor Hugo
         },
       },
 
@@ -79,12 +80,13 @@ exports.criarSessaoCheckout = async (req, res) => {
   }
 };
 
-// --- 2. FUNÇÃO DO WEBHOOK (Ouvinte de Pagamentos + Envio de E-mail) ---
+// --- 3. FUNÇÃO DO WEBHOOK (Ouvinte de Pagamentos + Envio de E-mail) ---
 exports.webhookStripe = async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
   try {
+    // Valida se a requisição veio mesmo da Stripe usando o seu WEBHOOK_SECRET
     event = stripe.webhooks.constructEvent(
       req.body,
       sig,
@@ -95,38 +97,49 @@ exports.webhookStripe = async (req, res) => {
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  // Evento disparado quando o pagamento é concluído com sucesso
+  // Evento disparado quando o pagamento é CONCLUÍDO
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
-    const { eventoId, quantidade, usuarioEmail, tituloEvento } = session.metadata;
+    
+    // Recupera os dados guardados no metadata
+    const { usuarioEmail, tituloEvento, quantidade, eventoId } = session.metadata;
 
     console.log("----------------------------------------------");
-    console.log("💰 PAGAMENTO APROVADO! PROCESSANDO INGRESSO...");
+    console.log("💰 PAGAMENTO APROVADO! ENVIANDO INGRESSO...");
     
     try {
-      // AQUI VOCÊ PODE INSERIR NO SEU BANCO DE DADOS
-      // await db.query('INSERT INTO public.compras ...');
+      // OPIONAL: Aqui você pode inserir no seu banco de dados
+      // await db.query('INSERT INTO compras ...');
 
-      // ENVIO DO E-MAIL PARA O CLIENTE
+      // ENVIO DO E-MAIL COM O INGRESSO
       const mailOptions = {
-        from: '"Linkah Eventos" <nao-responda@linkah.com.br>',
+        from: `"Linkah Eventos" <${process.env.GMAIL_USER}>`,
         to: usuarioEmail,
-        subject: `Seu ingresso para ${tituloEvento} chegou! 🎟️`,
+        subject: `Confirmado! Seu ingresso para ${tituloEvento} 🎟️`,
         html: `
-          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
-            <h2 style="color: #e11d48; text-align: center;">Pagamento Confirmado!</h2>
-            <p>Olá, <strong>${usuarioEmail}</strong>!</p>
-            <p>Seu pedido para o evento <strong>${tituloEvento}</strong> foi aprovado. Aqui estão os detalhes do seu ingresso:</p>
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 12px;">
+            <div style="text-align: center;">
+              <h1 style="color: #e11d48; margin-bottom: 5px;">Linkah</h1>
+              <p style="color: #666; font-size: 14px;">Seu ingresso chegou!</p>
+            </div>
             
-            <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; border-left: 5px solid #e11d48; margin: 20px 0;">
-              <p style="margin: 5px 0;"><strong>Evento:</strong> ${tituloEvento}</p>
+            <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+            
+            <p>Olá, <strong>${usuarioEmail}</strong>!</p>
+            <p>Seu pagamento foi confirmado. Aqui estão os detalhes para o seu check-in:</p>
+            
+            <div style="background-color: #f8fafc; padding: 20px; border-radius: 10px; border: 1px solid #e2e8f0; margin: 20px 0;">
+              <h2 style="margin: 0 0 10px 0; font-size: 18px; color: #0f172a;">${tituloEvento}</h2>
               <p style="margin: 5px 0;"><strong>Quantidade:</strong> ${quantidade} ingresso(s)</p>
+              <p style="margin: 5px 0;"><strong>Status:</strong> Pagamento Aprovado</p>
               <p style="margin: 5px 0;"><strong>Valor Total:</strong> R$ ${(session.amount_total / 100).toFixed(2)}</p>
             </div>
 
-            <p style="text-align: center; font-size: 12px; color: #777;">Apresente este e-mail na entrada do evento para realizar o seu check-in.</p>
-            <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
-            <p style="text-align: center; font-weight: bold; color: #e11d48;">Linkah - Conectando você aos melhores eventos.</p>
+            <p style="font-size: 13px; color: #64748b; text-align: center;">Apresente este e-mail (ou o PDF da compra) no dia do evento para realizar sua entrada.</p>
+            
+            <div style="text-align: center; margin-top: 30px;">
+              <p style="font-size: 12px; color: #94a3b8;">Linkah - Eventos e Conexões</p>
+            </div>
           </div>
         `,
       };
@@ -134,12 +147,13 @@ exports.webhookStripe = async (req, res) => {
       await transporter.sendMail(mailOptions);
       console.log(`📧 Ingresso enviado com sucesso para: ${usuarioEmail}`);
 
-    } catch (dbError) {
-      console.error("❌ Erro ao processar banco/email após pagamento:", dbError.message);
+    } catch (error) {
+      console.error("❌ Erro ao enviar e-mail ou salvar no banco:", error.message);
     }
     
     console.log("----------------------------------------------");
   }
 
+  // Avisa a Stripe que recebemos o Webhook corretamente
   res.status(200).json({ received: true });
 };
