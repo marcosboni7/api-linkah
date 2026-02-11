@@ -26,11 +26,13 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
+    // Permite requisições sem origin (como apps mobile ou curl)
     if (!origin) return callback(null, true);
     
-    const isVercel = origin.endsWith('.vercel.app');
+    // Verifica se a origin está na lista ou se é um subdomínio da Vercel
+    const isAllowed = allowedOrigins.includes(origin) || origin.endsWith('.vercel.app');
     
-    if (allowedOrigins.indexOf(origin) !== -1 || isVercel) {
+    if (isAllowed) {
       return callback(null, true);
     } else {
       console.log("🚫 CORS Bloqueado para:", origin);
@@ -38,16 +40,17 @@ app.use(cors({
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  credentials: true
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
+// Ajuste no Helmet para não quebrar o redirecionamento da Stripe
 app.use(helmet({ 
   contentSecurityPolicy: false,
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// --- 2. ROTA DE WEBHOOK (CRÍTICO: DEVE VIR ANTES DO EXPRESS.JSON) ---
-// Usamos o express.raw para validar a assinatura da Stripe com o body bruto
+// --- 2. ROTA DE WEBHOOK (DEVE VIR ANTES DO EXPRESS.JSON) ---
 app.post(
   '/api/pagamentos/webhook',
   express.raw({ type: 'application/json' }),
@@ -163,7 +166,8 @@ app.use('/api/compras', compraRoutes);
 app.use('/api/pagamentos', pagamentoRoutes);
 app.use('/api/comunidade', comunidadeRoutes);
 
-app.get('/ping', (req, res) => res.status(200).send('Linkah API Online 🚀'));
+// Rota de teste rápido
+app.get('/ping', (req, res) => res.status(200).json({ status: 'Linkah API Online', timestamp: new Date() }));
 
 // --- 7. START DO SERVIDOR ---
 const PORT = process.env.PORT || 3001;
