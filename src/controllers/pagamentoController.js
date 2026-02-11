@@ -7,10 +7,9 @@ exports.criarSessaoCheckout = async (req, res) => {
     console.log("Tentando criar sessão real para:", evento.titulo);
 
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
+      payment_method_types: ['card'], // Mantendo apenas cartão conforme solicitado anteriormente
       line_items: [
         {
-          // REMOVEMOS o price_data complexo e simplificamos para o básico
           price_data: {
             currency: 'brl',
             product_data: {
@@ -22,20 +21,21 @@ exports.criarSessaoCheckout = async (req, res) => {
         },
       ],
       mode: 'payment',
-      // Importante: Algumas contas novas exigem que o e-mail não seja enviado 
-      // se não houver um cliente cadastrado. Vamos comentar esta linha para testar:
-      // customer_email: usuarioEmail, 
+      // customer_email: usuarioEmail, // Opcional: descomente se quiser pré-preencher o email na Stripe
       success_url: `https://linkah-frontend-ivory.vercel.app/pagamento/sucesso?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `https://linkah-frontend-ivory.vercel.app/checkout?eventoId=${evento.id}`,
+      cancel_url: `https://linkah-frontend-ivory.vercel.app/venda?eventoId=${evento.id}`,
     });
 
     console.log("Sessão criada com sucesso! ID:", session.id);
-    res.json({ id: session.id });
+    
+    // IMPORTANTE: Retornamos a URL para o redirecionamento direto
+    res.json({ 
+      id: session.id, 
+      url: session.url 
+    });
 
   } catch (err) {
-    // ESTA LINHA É A MAIS IMPORTANTE AGORA:
     console.error("ERRO REAL DA STRIPE:", err.raw ? err.raw.message : err.message);
-    
     res.status(500).json({ 
       error: "Erro na Stripe", 
       details: err.message 
