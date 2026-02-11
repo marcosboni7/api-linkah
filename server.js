@@ -24,17 +24,28 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
+    // Permitir requisições sem origin (como mobile ou Postman)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) === -1) {
-      return callback(new Error('CORS não permitido'), false);
+    
+    // Verifica se a origin está na lista ou se é um domínio da Vercel
+    const isVercel = origin.endsWith('.vercel.app');
+    
+    if (allowedOrigins.indexOf(origin) !== -1 || isVercel) {
+      return callback(null, true);
+    } else {
+      console.log("CORS Bloqueado para:", origin);
+      return callback(new Error('CORS não permitido pela política do servidor'), false);
     }
-    return callback(null, true);
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true
 }));
 
-app.use(helmet({ contentSecurityPolicy: false }));
+// Helmet ajustado para não interferir no fluxo de pagamento externo
+app.use(helmet({ 
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 
 // --- 2. ROTA DE WEBHOOK (DEVE VIR ANTES DO JSON PARSER) ---
 app.post(
@@ -119,7 +130,6 @@ const inicializarBanco = async () => {
         criado_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-      /* TABELA DE MENSAGENS V2 - PARA CORRIGIR CONFLITOS */
       CREATE TABLE IF NOT EXISTS public.mensagens_v2 (
         id SERIAL PRIMARY KEY,
         evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE,
