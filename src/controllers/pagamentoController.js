@@ -42,7 +42,7 @@ exports.criarSessaoCheckout = async (req, res) => {
                 tituloEvento: evento.titulo,
                 quantidade: quantidade.toString()
             },
-            // Redireciona para sua pasta correta no Next.js
+            // Redireciona para a página de sucesso no Next.js passando o ID da sessão
             success_url: `${baseUrl}/pagamento/sucesso?session_id={CHECKOUT_SESSION_ID}`,
             cancel_url: `${baseUrl}/venda?eventoId=${evento.id}&qtd=${quantidade}`,
         });
@@ -133,24 +133,24 @@ exports.webhookStripe = async (req, res) => {
     res.status(200).json({ received: true });
 };
 
-// --- 3. NOVA FUNÇÃO: BUSCAR DETALHES PARA A TELA DE SUCESSO ---
-// Essa função responde ao Front-end com os dados que estão no banco
+// --- 3. BUSCAR DETALHES PARA A TELA DE SUCESSO ---
+// Função que o Front-end chama para pegar os dados do banco usando o ID da sessão do Stripe
 exports.buscarDetalhesCompra = async (req, res) => {
     try {
         const { sessionId } = req.params;
         
         const result = await db.query(
-            "SELECT * FROM public.compras WHERE stripe_session_id = $1", 
+            "SELECT evento_nome, usuario_email, quantidade, valor_total, TO_CHAR(data_evento, 'DD/MM/YYYY') as data_evento_formatada FROM public.compras WHERE stripe_session_id = $1", 
             [sessionId]
         );
 
         if (result.rows.length > 0) {
             res.json(result.rows[0]);
         } else {
-            res.status(404).json({ error: "Compra não encontrada." });
+            res.status(404).json({ error: "Compra não encontrada no banco de dados." });
         }
     } catch (err) {
         console.error("❌ Erro ao buscar detalhes:", err.message);
-        res.status(500).json({ error: "Erro interno no servidor." });
+        res.status(500).json({ error: "Erro interno no servidor ao buscar dados do ingresso." });
     }
 };
