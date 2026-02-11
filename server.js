@@ -3,13 +3,15 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 
-// CAMINHOS
+// CAMINHOS DAS ROTAS
 const authRoutes = require('./src/routes/authRoutes');
 const eventoRoutes = require('./src/routes/eventoRoutes');
 const compraRoutes = require('./src/routes/compraRoutes');
 const pagamentoRoutes = require('./src/routes/pagamentoRoutes');
 const comunidadeRoutes = require('./src/routes/comunidadeRoutes');
-const webhookController = require('./src/controllers/webhookController');
+
+// CONTROLLERS
+const pagamentoController = require('./src/controllers/pagamentoController');
 const db = require('./src/config/database');
 
 const app = express();
@@ -24,16 +26,14 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Permitir requisições sem origin (como mobile ou Postman)
     if (!origin) return callback(null, true);
     
-    // Verifica se a origin está na lista ou se é um domínio da Vercel
     const isVercel = origin.endsWith('.vercel.app');
     
     if (allowedOrigins.indexOf(origin) !== -1 || isVercel) {
       return callback(null, true);
     } else {
-      console.log("CORS Bloqueado para:", origin);
+      console.log("🚫 CORS Bloqueado para:", origin);
       return callback(new Error('CORS não permitido pela política do servidor'), false);
     }
   },
@@ -41,24 +41,24 @@ app.use(cors({
   credentials: true
 }));
 
-// Helmet ajustado para não interferir no fluxo de pagamento externo
 app.use(helmet({ 
   contentSecurityPolicy: false,
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// --- 2. ROTA DE WEBHOOK (DEVE VIR ANTES DO JSON PARSER) ---
+// --- 2. ROTA DE WEBHOOK (CRÍTICO: DEVE VIR ANTES DO EXPRESS.JSON) ---
+// Usamos o express.raw para validar a assinatura da Stripe com o body bruto
 app.post(
   '/api/pagamentos/webhook',
   express.raw({ type: 'application/json' }),
-  webhookController.ouvirStripe
+  pagamentoController.webhookStripe
 );
 
-// --- 3. PARSERS JSON ---
+// --- 3. PARSERS JSON (PARA AS DEMAIS ROTAS) ---
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// --- 4. INICIALIZAÇÃO DO BANCO ---
+// --- 4. INICIALIZAÇÃO E SINCRONIZAÇÃO DO BANCO ---
 const inicializarBanco = async () => {
   try {
     console.log('⏳ Sincronizando tabelas com o banco de dados...');
@@ -141,11 +141,11 @@ const inicializarBanco = async () => {
 
     console.log('✅ Estrutura do banco de dados verificada!');
   } catch (err) {
-    console.error('❌ ERRO NA INICIALIZAÇÃO:', err.message);
+    console.error('❌ ERRO NA INICIALIZAÇÃO DO BANCO:', err.message);
   }
 };
 
-// --- 5. MONITORAMENTO ---
+// --- 5. MONITORAMENTO DE REQUISIÇÕES ---
 app.use((req, res, next) => {
   if (['POST', 'PUT'].includes(req.method) && req.url !== '/api/pagamentos/webhook') {
     const bodyLog = { ...req.body };
@@ -165,7 +165,7 @@ app.use('/api/comunidade', comunidadeRoutes);
 
 app.get('/ping', (req, res) => res.status(200).send('Linkah API Online 🚀'));
 
-// --- 7. START ---
+// --- 7. START DO SERVIDOR ---
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, async () => {
   console.log(`🚀 Servidor rodando na porta: ${PORT}`);
