@@ -20,8 +20,10 @@ exports.criarSessaoCheckout = async (req, res) => {
         // O baseUrl virá EXCLUSIVAMENTE do seu Environment Variable no Render
         const baseUrl = process.env.FRONTEND_URL;
 
-        if (!baseUrl) {
-            console.error("🚨 ALERTA: A variável FRONTEND_URL não está definida no Render!");
+        // Validação de segurança para evitar o erro "Invalid URL"
+        if (!baseUrl || !baseUrl.startsWith('http')) {
+            console.error("🚨 ERRO CRÍTICO: A variável FRONTEND_URL não está definida ou é inválida no Render!");
+            return res.status(500).json({ error: "Configuração de URL do servidor ausente." });
         }
 
         console.log(`🎟️ Iniciando Checkout: ${usuarioEmail} para o evento ${evento.titulo}`);
@@ -47,7 +49,7 @@ exports.criarSessaoCheckout = async (req, res) => {
                 tituloEvento: evento.titulo,
                 quantidade: quantidade.toString()
             },
-            // Sem localhost aqui! O redirecionamento será para o seu site oficial na Vercel
+            // Redireciona para o seu site na Vercel
             success_url: `${baseUrl}/sucesso?session_id={CHECKOUT_SESSION_ID}`,
             cancel_url: `${baseUrl}/venda?eventoId=${evento.id}&qtd=${quantidade}`,
         });
@@ -75,7 +77,6 @@ exports.webhookStripe = async (req, res) => {
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    // Só processamos se o pagamento foi concluído com sucesso
     if (event.type === 'checkout.session.completed') {
         const session = event.data.object;
         const { usuarioEmail, tituloEvento, quantidade, eventoId } = session.metadata;
@@ -83,7 +84,7 @@ exports.webhookStripe = async (req, res) => {
         console.log(`✅ Pagamento Confirmado: ${usuarioEmail} comprou ${quantidade} ingressos.`);
 
         try {
-            // 1. REGISTRAR COMPRA NO BANCO DE DADOS (Importante para aparecer na Navbar)
+            // 1. REGISTRAR COMPRA NO BANCO DE DADOS
             const queryBanco = `
                 INSERT INTO public.compras (
                     usuario_email, 
@@ -103,7 +104,7 @@ exports.webhookStripe = async (req, res) => {
                 eventoId,
                 tituloEvento,
                 parseInt(quantidade),
-                session.amount_total / 100, // Converte centavos de volta para Real
+                session.amount_total / 100, // Volta centavos para Real
                 'Aprovado',
                 session.id
             ]);
@@ -111,29 +112,28 @@ exports.webhookStripe = async (req, res) => {
             console.log("💾 Compra salva com sucesso no banco de dados.");
 
             // 2. GERAR IMAGEM DO QR CODE
-            // O código do QR contém o ID da sessão e o e-mail para validação na portaria
             const qrCodeData = `LINKAH-${session.id}-${usuarioEmail}`;
             const qrCodeImage = await QRCode.toDataURL(qrCodeData);
 
-            // 3. ENVIAR E-MAIL DE CONFIRMAÇÃO PARA O CLIENTE
+            // 3. ENVIAR E-MAIL DE CONFIRMAÇÃO
             const mailOptions = {
                 from: `"Linkah Eventos" <${process.env.GMAIL_USER}>`,
                 to: usuarioEmail,
                 subject: `🎟️ Seu Ingresso: ${tituloEvento}`,
                 html: `
-                    <div style="font-family: Arial, sans-serif; max-width: 500px; margin: auto; border: 1px solid #ddd; border-radius: 10px; padding: 20px; text-align: center;">
-                        <h1 style="color: #d6006d; font-style: italic;">LINKAH.</h1>
-                        <h2 style="color: #333;">Sua entrada está garantida!</h2>
-                        <p style="color: #666;">Apresente o QR Code abaixo no dia do evento:</p>
-                        <div style="margin: 30px 0;">
-                            <img src="${qrCodeImage}" alt="QR Code Ingresso" width="200" height="200" />
+                    <div style="font-family: sans-serif; max-width: 500px; margin: auto; border: 1px solid #ddd; border-radius: 15px; padding: 25px; text-align: center;">
+                        <h1 style="color: #e11d48; font-style: italic; letter-spacing: -1px;">LINKAH.</h1>
+                        <h2 style="color: #1e293b;">Sua entrada está garantida!</h2>
+                        <p style="color: #64748b;">Apresente o QR Code abaixo no dia do evento:</p>
+                        <div style="margin: 30px 0; display: flex; justify-content: center;">
+                            <img src="${qrCodeImage}" alt="QR Code Ingresso" width="200" height="200" style="margin: 0 auto; border: 4px solid #f1f5f9; border-radius: 10px;" />
                         </div>
-                        <div style="background: #fdf2f8; padding: 15px; border-radius: 8px; text-align: left; border-left: 4px solid #d6006d;">
-                            <p style="margin: 5px 0;"><strong>Evento:</strong> ${tituloEvento}</p>
-                            <p style="margin: 5px 0;"><strong>Quantidade:</strong> ${quantidade}x Ingressos</p>
-                            <p style="margin: 5px 0;"><strong>Comprador:</strong> ${usuarioEmail}</p>
+                        <div style="background: #fff1f2; padding: 20px; border-radius: 12px; text-align: left; border: 1px solid #fecdd3;">
+                            <p style="margin: 5px 0; font-size: 14px;"><strong>Evento:</strong> ${tituloEvento}</p>
+                            <p style="margin: 5px 0; font-size: 14px;"><strong>Quantidade:</strong> ${quantidade}x Ingressos</p>
+                            <p style="margin: 5px 0; font-size: 14px;"><strong>Comprador:</strong> ${usuarioEmail}</p>
                         </div>
-                        <p style="font-size: 11px; color: #999; margin-top: 20px;">Este é um e-mail automático da Linkah. Não é necessário responder.</p>
+                        <p style="font-size: 12px; color: #94a3b8; margin-top: 25px;">ID do Pedido: ${session.id}</p>
                     </div>
                 `,
             };
@@ -142,10 +142,9 @@ exports.webhookStripe = async (req, res) => {
             console.log(`📧 E-mail com QR Code enviado para ${usuarioEmail}`);
 
         } catch (error) {
-            console.error("❌ Erro interno ao processar sucesso do pagamento:", error.message);
+            console.error("❌ Erro interno no webhook:", error.message);
         }
     }
 
-    // Notifica a Stripe que o Webhook foi recebido
     res.status(200).json({ received: true });
 };
