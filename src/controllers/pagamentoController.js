@@ -4,14 +4,12 @@ exports.criarSessaoCheckout = async (req, res) => {
   try {
     const { evento, usuarioEmail, quantidade } = req.body;
 
-    // Log para você conferir no Render se os dados chegaram
-    console.log("Iniciando checkout para:", evento.titulo);
+    // Log para conferência no log do Render
+    console.log("Iniciando checkout Live (Apenas Cartão) para:", evento.titulo);
 
     const session = await stripe.checkout.sessions.create({
-      // Como seu SDK é antigo, voltamos para a lista manual
-      // ATENÇÃO: Se o Pix der erro de "método inválido", remova o 'pix' da lista abaixo
-      // até que a conta do seu cliente seja aprovada no painel.
-      payment_method_types: ['card', 'pix'], 
+      // Removido 'pix' para evitar erro de conta nova (trava de 60 dias)
+      payment_method_types: ['card'], 
       line_items: [
         {
           price_data: {
@@ -19,13 +17,14 @@ exports.criarSessaoCheckout = async (req, res) => {
             product_data: {
               name: evento.titulo || "Ingresso",
             },
-            // Convertendo 0.8 para 80 centavos corretamente
+            // Converte o preço para centavos (Ex: 50.00 -> 5000)
             unit_amount: Math.round(parseFloat(evento.preco) * 100),
           },
           quantity: parseInt(quantidade) || 1,
         },
       ],
       mode: 'payment',
+      customer_email: usuarioEmail, // Preenche o e-mail automaticamente no Stripe
       success_url: `https://linkah-frontend-ivory.vercel.app/pagamento/sucesso?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `https://linkah-frontend-ivory.vercel.app/checkout?eventoId=${evento.id}`,
       metadata: {
@@ -35,6 +34,7 @@ exports.criarSessaoCheckout = async (req, res) => {
       },
     });
 
+    // Retorna o ID da sessão para o frontend fazer o redirecionamento
     res.json({ id: session.id });
 
   } catch (err) {
