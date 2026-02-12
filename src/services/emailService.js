@@ -1,54 +1,72 @@
 const { Resend } = require('resend');
 
-// O Resend usa apenas a API KEY que você colocou no Render
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 /**
- * Função para enviar o e-mail do ingresso via RESEND
- * @param {string} emailCliente 
- * @param {object} dadosIngresso 
+ * Envia o e-mail do ingresso com layout profissional
  */
 const enviarIngressoEmail = async (emailCliente, dadosIngresso) => {
   try {
-    const data = await resend.emails.send({
-      from: 'Linkah Eventos <onboarding@resend.dev>', // No início, use este remetente padrão do Resend
+    const { data, error } = await resend.emails.send({
+      from: 'Linkah Eventos <onboarding@resend.dev>',
       to: emailCliente,
-      subject: `Seu ingresso para ${dadosIngresso.tituloEvento} chegou! 🎟️`,
+      subject: `🎟️ Seu ingresso para ${dadosIngresso.tituloEvento} chegou!`,
       html: `
-        <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; border-radius: 20px; overflow: hidden;">
-          <div style="background: #f43f5e; padding: 20px; text-align: center;">
-            <h1 style="color: white; margin: 0; font-style: italic;">LINKAH.</h1>
+        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; border: 1px solid #f1f5f9; border-radius: 24px; overflow: hidden; background-color: #ffffff; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);">
+          
+          <div style="background: #f43f5e; padding: 30px; text-align: center;">
+            <h1 style="color: white; margin: 0; font-style: italic; font-size: 32px; letter-spacing: -1px;">LINKAH.</h1>
           </div>
-          <div style="padding: 30px;">
-            <h2 style="color: #1e293b; margin-top: 0;">Seu lugar está garantido!</h2>
-            <p style="color: #64748b;">Olá! Seu pagamento foi confirmado e seu ingresso já está disponível.</p>
+
+          <div style="padding: 40px; color: #1e293b;">
+            <h2 style="margin-top: 0; font-size: 24px; color: #0f172a;">Seu lugar está reservado!</h2>
+            <p style="font-size: 16px; line-height: 1.6; color: #64748b;">
+                Tudo pronto! Seu pagamento foi processado com sucesso. Abaixo estão os detalhes do seu evento:
+            </p>
             
-            <div style="background: #fff1f2; padding: 25px; border-radius: 15px; border: 1px dashed #f43f5e;">
-              <h3 style="margin: 0; color: #f43f5e; text-transform: uppercase;">${dadosIngresso.tituloEvento}</h3>
-              <hr style="border: none; border-top: 1px solid #fecdd3; margin: 15px 0;" />
-              <p style="margin: 5px 0; font-size: 14px;"><strong>🛒 QUANTIDADE:</strong> ${dadosIngresso.quantidade}x</p>
-              <p style="margin: 5px 0; font-size: 14px;"><strong>👤 TITULAR:</strong> ${emailCliente.split('@')[0].toUpperCase()}</p>
+            <div style="background: #fff1f2; padding: 25px; border-radius: 20px; border: 2px dashed #f43f5e; margin: 30px 0;">
+              <h3 style="margin: 0 0 15px 0; color: #f43f5e; text-transform: uppercase; font-size: 18px; letter-spacing: 1px;">
+                ${dadosIngresso.tituloEvento}
+              </h3>
+              
+              <div style="font-size: 15px; color: #475569;">
+                <p style="margin: 8px 0;"><strong>📅 DATA:</strong> ${dadosIngresso.dataEvento}</p>
+                <p style="margin: 8px 0;"><strong>⏰ HORA:</strong> ${dadosIngresso.horaEvento}</p>
+                <p style="margin: 8px 0;"><strong>📍 LOCAL:</strong> ${dadosIngresso.localEvento}</p>
+                <p style="margin: 8px 0;"><strong>🎫 QTD:</strong> ${dadosIngresso.quantidade} ingresso(s)</p>
+              </div>
             </div>
 
-            <div style="text-align: center; margin-top: 30px;">
+            <div style="text-align: center; margin: 40px 0;">
               <a href="${dadosIngresso.linkIngresso}" 
-                 style="background: #f43f5e; color: white; padding: 15px 25px; text-decoration: none; border-radius: 12px; font-weight: bold; display: inline-block; box-shadow: 0 4px 10px rgba(244, 63, 94, 0.3);">
-                VISUALIZAR INGRESSO
+                 style="background: #f43f5e; color: white; padding: 18px 35px; text-decoration: none; border-radius: 16px; font-weight: bold; display: inline-block; font-size: 16px; box-shadow: 0 4px 12px rgba(244, 63, 94, 0.4);">
+                ACESSAR MEU INGRESSO
               </a>
             </div>
             
-            <p style="margin-top: 30px; font-size: 12px; color: #94a3b8; text-align: center;">
-              Apresente o seu ticket na entrada do evento.
+            <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 30px 0;" />
+            
+            <p style="font-size: 13px; color: #94a3b8; text-align: center; line-height: 1.5;">
+              Apresente o ingresso digital no seu celular ao chegar no evento. <br/>
+              Caso tenha dúvidas, entre em contato com o produtor.
             </p>
+          </div>
+
+          <div style="background: #f8fafc; padding: 20px; text-align: center; font-size: 12px; color: #cbd5e1;">
+            © 2026 Linkah Eventos. Todos os direitos reservados.
           </div>
         </div>
       `,
     });
 
-    console.log('✅ E-mail enviado via Resend ID:', data.id);
+    if (error) {
+        console.error('❌ Erro API Resend:', error);
+        return null;
+    }
+
     return data;
-  } catch (error) {
-    console.error('❌ Erro no Resend:', error.message);
+  } catch (err) {
+    console.error('❌ Erro fatal no envio:', err.message);
     return null;
   }
 };

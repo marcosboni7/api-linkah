@@ -24,14 +24,18 @@ exports.criarSessaoCheckout = async (req, res) => {
                     },
                     unit_amount: Math.round(Number(evento.preco) * 100),
                 },
-                quantity: quantidade,
+                quantity: parseInt(quantidade),
             }],
             mode: 'payment',
             metadata: {
                 usuarioEmail,
                 eventoId: evento.id.toString(),
                 tituloEvento: evento.titulo,
-                quantidade: quantidade.toString()
+                quantidade: quantidade.toString(),
+                // Novos detalhes para o e-mail
+                dataEvento: evento.data_inicio || 'A confirmar',
+                horaEvento: evento.hora_inicio || 'A confirmar',
+                localEvento: evento.local_nome || 'Local a definir'
             },
             success_url: `${baseUrl}/pagamento/sucesso?session_id={CHECKOUT_SESSION_ID}`,
             cancel_url: `${baseUrl}/venda?eventoId=${evento.id}&qtd=${quantidade}`,
@@ -44,32 +48,40 @@ exports.criarSessaoCheckout = async (req, res) => {
     }
 };
 
-// --- 2. WEBHOOK DA STRIPE (Processamento Pós-Pagamento) ---
+// --- 2. WEBHOOK DA STRIPE ---
 exports.webhookStripe = async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
 
     try {
-        // Valida se a requisição veio realmente do Stripe
         event = stripe.webhooks.constructEvent(
             req.body,
             sig,
             process.env.STRIPE_WEBHOOK_SECRET
         );
     } catch (err) {
-        console.error(`⚠️ Erro na assinatura do Webhook: ${err.message}`);
+        console.error(`⚠️ Erro Webhook Signature: ${err.message}`);
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    // Quando o pagamento for confirmado com sucesso
     if (event.type === 'checkout.session.completed') {
         const session = event.data.object;
-        const { usuarioEmail, tituloEvento, quantidade, eventoId } = session.metadata;
+        
+        // Pegando todos os dados do metadata
+        const { 
+            usuarioEmail, 
+            tituloEvento, 
+            quantidade, 
+            eventoId, 
+            dataEvento, 
+            horaEvento, 
+            localEvento 
+        } = session.metadata;
 
-        console.log(`✅ Pagamento aprovado para: ${usuarioEmail}`);
+        console.log(`✅ Pagamento aprovado: ${usuarioEmail}`);
 
         try {
-            // 1. REGISTRAR COMPRA NO BANCO DE DADOS
+            // 1. Salva no Banco
             await db.query(`
                 INSERT INTO public.compras (
                     usuario_email, evento_id, evento_nome, data_evento, 
@@ -85,37 +97,35 @@ exports.webhookStripe = async (req, res) => {
                 session.id
             ]);
 
-            console.log('✨ Compra registrada no banco de dados!');
-
-            // 2. PREPARAR DADOS PARA O E-MAIL
+            // 2. Prepara dados para o e-mail
             const linkIngresso = `${process.env.FRONTEND_URL}/pagamento/sucesso?session_id=${session.id}`;
             
             const dadosParaEmail = {
-                tituloEvento: tituloEvento,
-                quantidade: quantidade,
-                linkIngresso: linkIngresso
+                tituloEvento,
+                quantidade,
+                linkIngresso,
+                dataEvento,
+                horaEvento,
+                localEvento
             };
 
-            // 3. ENVIAR E-MAIL VIA RESEND (Serviço externo)
+            // 3. Envia o e-mail via Resend
             await enviarIngressoEmail(usuarioEmail, dadosParaEmail);
 
-            console.log(`📧 E-mail de confirmação enviado para: ${usuarioEmail}`);
+            console.log(`📧 Ticket enviado para: ${usuarioEmail}`);
 
         } catch (error) {
-            // Logamos o erro mas enviamos 200 para o Stripe não ficar tentando reenviar
-            console.error("❌ Erro no processamento interno do webhook:", error.message);
+            console.error("❌ Erro no processamento pós-pagamento:", error.message);
         }
     }
 
-    // Responde ao Stripe que o evento foi recebido com sucesso
     res.status(200).json({ received: true });
 };
 
-// --- 3. BUSCAR DETALHES PARA A TELA DE SUCESSO ---
+// --- 3. BUSCAR DETALHES ---
 exports.buscarDetalhesCompra = async (req, res) => {
     try {
         const { sessionId } = req.params;
-        
         const result = await db.query(
             "SELECT evento_nome, usuario_email, quantidade, valor_total, TO_CHAR(data_evento, 'DD/MM/YYYY') as data_evento_formatada FROM public.compras WHERE stripe_session_id = $1", 
             [sessionId]
@@ -124,10 +134,9 @@ exports.buscarDetalhesCompra = async (req, res) => {
         if (result.rows.length > 0) {
             res.json(result.rows[0]);
         } else {
-            res.status(404).json({ error: "Compra não encontrada no banco de dados." });
+            res.status(404).json({ error: "Compra não encontrada." });
         }
     } catch (err) {
-        console.error("❌ Erro ao buscar detalhes:", err.message);
-        res.status(500).json({ error: "Erro interno no servidor." });
+        res.status(500).json({ error: "Erro interno." });
     }
 };
