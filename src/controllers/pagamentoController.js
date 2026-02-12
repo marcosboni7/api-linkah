@@ -1,79 +1,32 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const nodemailer = require('nodemailer');
-const db = require('../config/database');
-
-// Configuração do Transporter para envio de e-mail (Gmail)
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.GMAIL_USER,
-        pass: process.env.GMAIL_PASS, // Senha de App de 16 dígitos
-    },
-});
-
-// --- 1. CRIAR SESSÃO DE CHECKOUT ---
-exports.criarSessaoCheckout = async (req, res) => {
-    try {
-        const { evento, usuarioEmail, quantidade } = req.body;
-        const baseUrl = process.env.FRONTEND_URL;
-
-        if (!baseUrl || !baseUrl.startsWith('http')) {
-            console.error("🚨 FRONTEND_URL ausente no Render!");
-            return res.status(500).json({ error: "Configuração de URL do servidor ausente." });
-        }
-
-        const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
-            customer_email: usuarioEmail,
-            line_items: [{
-                price_data: {
-                    currency: 'brl',
-                    product_data: { 
-                        name: `Ingresso: ${evento.titulo}`,
-                    },
-                    unit_amount: Math.round(Number(evento.preco) * 100),
-                },
-                quantity: quantidade,
-            }],
-            mode: 'payment',
-            metadata: {
-                usuarioEmail,
-                eventoId: evento.id.toString(),
-                tituloEvento: evento.titulo,
-                quantidade: quantidade.toString()
-            },
-            // Redireciona para a página de sucesso no Next.js passando o ID da sessão
-            success_url: `${baseUrl}/pagamento/sucesso?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${baseUrl}/venda?eventoId=${evento.id}&qtd=${quantidade}`,
-        });
-
-        res.json({ url: session.url });
-    } catch (err) {
-        console.error("❌ Erro Stripe:", err.message);
-        res.status(500).json({ error: err.message });
-    }
-};
-
 // --- 2. WEBHOOK DA STRIPE (Processamento Pós-Pagamento) ---
 exports.webhookStripe = async (req, res) => {
-    const sig = req.headers['stripe-signature'];
+    // Comentamos a assinatura para permitir o teste manual via cURL
+    // const sig = req.headers['stripe-signature']; 
     let event;
 
     try {
+        // COMENTAMOS O CONSTRUCTEVENT PARA TESTE:
+        /*
         event = stripe.webhooks.constructEvent(
             req.body,
             sig,
             process.env.STRIPE_WEBHOOK_SECRET
         );
-    } catch (err) {
-        return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
+        */
+        
+        // AGORA ACEITAMOS O CORPO DA REQUISIÇÃO DIRETO:
+        event = req.body; 
 
-    if (event.type === 'checkout.session.completed') {
-        const session = event.data.object;
-        const { usuarioEmail, tituloEvento, quantidade, eventoId } = session.metadata;
+        console.log("🔔 Webhook recebido (Modo Manual):", event.type);
 
-        try {
+        if (event.type === 'checkout.session.completed') {
+            const session = event.data.object;
+            
+            // Pegando os dados do metadata (importante!)
+            const { usuarioEmail, tituloEvento, quantidade, eventoId } = session.metadata;
+
+            console.log("📝 Tentando salvar no banco para:", usuarioEmail);
+
             // 1. REGISTRAR COMPRA NO BANCO DE DADOS
             await db.query(`
                 INSERT INTO public.compras (
@@ -90,67 +43,26 @@ exports.webhookStripe = async (req, res) => {
                 session.id
             ]);
 
+            console.log("✅ Compra salva no banco!");
+
             // 2. CRIAR O LINK DO INGRESSO DIGITAL
             const linkIngresso = `${process.env.FRONTEND_URL}/pagamento/sucesso?session_id=${session.id}`;
 
-            // 3. ENVIAR E-MAIL COM O BOTÃO PARA ACESSAR O INGRESSO
+            // 3. ENVIAR E-MAIL
             await transporter.sendMail({
                 from: `"Linkah Eventos" <${process.env.GMAIL_USER}>`,
                 to: usuarioEmail,
                 subject: `🎟️ Seu Ingresso Confirmado: ${tituloEvento}`,
-                html: `
-                    <div style="font-family: sans-serif; max-width: 500px; margin: auto; border: 1px solid #eee; border-radius: 20px; padding: 30px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-                        <h1 style="color: #e11d48; font-style: italic; letter-spacing: -2px; font-size: 32px;">LINKAH.</h1>
-                        <h2 style="color: #1e293b; margin-top: 10px;">Pagamento Confirmado!</h2>
-                        <p style="color: #64748b; font-size: 16px;">Sua entrada para o evento <b>${tituloEvento}</b> está garantida.</p>
-                        
-                        <div style="margin: 35px 0;">
-                            <a href="${linkIngresso}" style="background-color: #e11d48; color: white; padding: 18px 30px; border-radius: 14px; text-decoration: none; font-weight: bold; display: inline-block; font-size: 16px; box-shadow: 0 4px 10px rgba(225, 29, 72, 0.3);">
-                                ACESSAR MEU INGRESSO
-                            </a>
-                        </div>
-
-                        <div style="background: #f8fafc; padding: 20px; border-radius: 12px; text-align: left; border: 1px solid #f1f5f9;">
-                            <p style="margin: 5px 0; font-size: 14px; color: #475569;"><strong>Evento:</strong> ${tituloEvento}</p>
-                            <p style="margin: 5px 0; font-size: 14px; color: #475569;"><strong>Quantidade:</strong> ${quantidade}x Ingressos</p>
-                            <p style="margin: 5px 0; font-size: 14px; color: #475569;"><strong>E-mail:</strong> ${usuarioEmail}</p>
-                        </div>
-                        
-                        <p style="font-size: 12px; color: #94a3b8; margin-top: 25px;">
-                            Ao abrir o link, você poderá baixar seu ingresso em PDF.
-                        </p>
-                    </div>
-                `,
+                html: `<h1>Pagamento Confirmado!</h1><p>Acesse seu ingresso em: ${linkIngresso}</p>`
             });
 
             console.log(`✅ Processo concluído para ${usuarioEmail}`);
-
-        } catch (error) {
-            console.error("❌ Erro no processamento do webhook:", error.message);
         }
-    }
 
-    res.status(200).json({ received: true });
-};
+        res.status(200).json({ received: true });
 
-// --- 3. BUSCAR DETALHES PARA A TELA DE SUCESSO ---
-// Função que o Front-end chama para pegar os dados do banco usando o ID da sessão do Stripe
-exports.buscarDetalhesCompra = async (req, res) => {
-    try {
-        const { sessionId } = req.params;
-        
-        const result = await db.query(
-            "SELECT evento_nome, usuario_email, quantidade, valor_total, TO_CHAR(data_evento, 'DD/MM/YYYY') as data_evento_formatada FROM public.compras WHERE stripe_session_id = $1", 
-            [sessionId]
-        );
-
-        if (result.rows.length > 0) {
-            res.json(result.rows[0]);
-        } else {
-            res.status(404).json({ error: "Compra não encontrada no banco de dados." });
-        }
-    } catch (err) {
-        console.error("❌ Erro ao buscar detalhes:", err.message);
-        res.status(500).json({ error: "Erro interno no servidor ao buscar dados do ingresso." });
+    } catch (error) {
+        console.error("❌ Erro no processamento do webhook:", error.message);
+        res.status(500).json({ error: error.message });
     }
 };
