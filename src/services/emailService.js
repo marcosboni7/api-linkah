@@ -8,9 +8,11 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 const enviarIngressoEmail = async (emailCliente, dadosIngresso) => {
   try {
     const { data, error } = await resend.emails.send({
+      // Nome que aparece na caixa de entrada do cliente
       from: 'Linkah Eventos <onboarding@resend.dev>',
       to: emailCliente,
-      subject: `🎟️ Seu ingresso para ${dadosIngresso.tituloEvento} chegou!`,
+      // Assunto personalizado com o nome do evento
+      subject: `🎟️ Seu ingresso para: ${dadosIngresso.tituloEvento}`,
       html: `
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; border: 1px solid #f1f5f9; border-radius: 24px; overflow: hidden; background-color: #ffffff; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);">
           
@@ -48,7 +50,7 @@ const enviarIngressoEmail = async (emailCliente, dadosIngresso) => {
             
             <p style="font-size: 13px; color: #94a3b8; text-align: center; line-height: 1.5;">
               Apresente o ingresso digital no seu celular ao chegar no evento. <br/>
-              Caso tenha dúvidas, entre em contato com o produtor.
+              Caso tenha dúvidas, entre em contato com o suporte.
             </p>
           </div>
 
