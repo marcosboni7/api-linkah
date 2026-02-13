@@ -8,9 +8,9 @@ exports.criarSessaoCheckout = async (req, res) => {
         const { evento, usuarioEmail, quantidade } = req.body;
         const baseUrl = process.env.FRONTEND_URL;
 
-        // BUSCA DETALHES REAIS E O ID DA CONTA STRIPE DO PRODUTOR
+        // BUSCA DETALHES REAIS (Usando apenas colunas que existem no seu banco)
         const dadosEventoBD = await db.query(
-        "SELECT nome, data_inicio, hora_inicio, local_nome, stripe_account_id, valor FROM public.eventos WHERE id = $1",
+            "SELECT nome, data_inicio, hora_inicio, local_nome, stripe_account_id, preco FROM public.eventos WHERE id = $1",
             [evento.id]
         );
 
@@ -19,11 +19,17 @@ exports.criarSessaoCheckout = async (req, res) => {
         }
 
         const ev = dadosEventoBD.rows[0];
-        const precoUnitario = Number(ev.preco || evento.preco);
+
+        // LÓGICA DE PREÇO DINÂMICO:
+        // Se houver preço no banco (diferente de 0 ou 50 de teste), usa o do banco.
+        // Caso contrário, usa o preço que o produtor enviou pelo site.
+        const precoUnitario = (ev.preco && Number(ev.preco) !== 0 && Number(ev.preco) !== 50.00) 
+            ? Number(ev.preco) 
+            : Number(evento.preco);
 
         // CONFIGURAÇÃO DA SESSÃO COM STRIPE CONNECT (SPLIT)
         const sessionParams = {
-            payment_method_types: ['card'],
+            payment_method_types: ['card', 'apple_pay'],
             customer_email: usuarioEmail,
             line_items: [{
                 price_data: {
@@ -31,7 +37,7 @@ exports.criarSessaoCheckout = async (req, res) => {
                     product_data: { 
                         name: `Ingresso: ${ev.nome}`,
                     },
-                    unit_amount: Math.round(precoUnitario * 100),
+                    unit_amount: Math.round(precoUnitario * 100), // Centavos
                 },
                 quantity: parseInt(quantidade),
             }],
@@ -49,10 +55,10 @@ exports.criarSessaoCheckout = async (req, res) => {
             cancel_url: `${baseUrl}/venda?eventoId=${evento.id}&qtd=${quantidade}`,
         };
 
-        // SE O EVENTO TIVER UM PRODUTOR VINCULADO, ATIVA O SPLIT
+        // SE O EVENTO TIVER UM PRODUTOR VINCULADO (STRIPE CONNECT)
         if (ev.stripe_account_id) {
             sessionParams.payment_intent_data = {
-                // Sua taxa da Linkah (5% do total da venda) em centavos
+                // Sua taxa da Linkah (5% do total da venda)
                 application_fee_amount: Math.round((precoUnitario * 0.05) * 100 * quantidade),
                 // Destino dos 95% restantes (Conta do Produtor)
                 transfer_data: {
