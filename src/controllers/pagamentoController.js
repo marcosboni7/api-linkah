@@ -21,15 +21,15 @@ exports.criarSessaoCheckout = async (req, res) => {
         const ev = dadosEventoBD.rows[0];
 
         // LÓGICA DE PREÇO DINÂMICO:
-        // Se houver preço no banco (diferente de 0 ou 50 de teste), usa o do banco.
-        // Caso contrário, usa o preço que o produtor enviou pelo site.
+        // Prioriza o preço do banco. Se estiver vazio ou for o 50 de teste, usa o do site.
         const precoUnitario = (ev.preco && Number(ev.preco) !== 0 && Number(ev.preco) !== 50.00) 
             ? Number(ev.preco) 
             : Number(evento.preco);
 
-        // CONFIGURAÇÃO DA SESSÃO COM STRIPE CONNECT (SPLIT)
+        // CONFIGURAÇÃO DA SESSÃO COM STRIPE CHECKOUT
         const sessionParams = {
-            payment_method_types: ['card', 'apple_pay'],
+            // CORREÇÃO: 'card' engloba Apple/Google Pay. Adicionado 'pix' por ser Brasil.
+            payment_method_types: ['card', 'pix'],
             customer_email: usuarioEmail,
             line_items: [{
                 price_data: {
@@ -37,7 +37,7 @@ exports.criarSessaoCheckout = async (req, res) => {
                     product_data: { 
                         name: `Ingresso: ${ev.nome}`,
                     },
-                    unit_amount: Math.round(precoUnitario * 100), // Centavos
+                    unit_amount: Math.round(precoUnitario * 100), // Stripe usa centavos
                 },
                 quantity: parseInt(quantidade),
             }],
@@ -55,7 +55,7 @@ exports.criarSessaoCheckout = async (req, res) => {
             cancel_url: `${baseUrl}/venda?eventoId=${evento.id}&qtd=${quantidade}`,
         };
 
-        // SE O EVENTO TIVER UM PRODUTOR VINCULADO (STRIPE CONNECT)
+        // SE O EVENTO TIVER UM PRODUTOR VINCULADO (STRIPE CONNECT - SPLIT)
         if (ev.stripe_account_id) {
             sessionParams.payment_intent_data = {
                 // Sua taxa da Linkah (5% do total da venda)
