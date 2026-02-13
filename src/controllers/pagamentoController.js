@@ -10,7 +10,7 @@ exports.criarSessaoCheckout = async (req, res) => {
 
         // BUSCA DETALHES REAIS E O ID DA CONTA STRIPE DO PRODUTOR
         const dadosEventoBD = await db.query(
-            "SELECT nome, data_inicio, hora_inicio, local_nome, stripe_account_id, preco FROM public.eventos WHERE id = $1",
+        "SELECT nome, data_inicio, hora_inicio, local_nome, stripe_account_id, valor FROM public.eventos WHERE id = $1",
             [evento.id]
         );
 
