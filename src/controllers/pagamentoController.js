@@ -8,7 +8,7 @@ exports.criarSessaoCheckout = async (req, res) => {
         const { evento, usuarioEmail, quantidade } = req.body;
         const baseUrl = process.env.FRONTEND_URL;
 
-        // BUSCA DETALHES REAIS (Usando apenas colunas que existem no seu banco)
+        // BUSCA DETALHES REAIS NO BANCO
         const dadosEventoBD = await db.query(
             "SELECT nome, data_inicio, hora_inicio, local_nome, stripe_account_id, preco FROM public.eventos WHERE id = $1",
             [evento.id]
@@ -20,16 +20,14 @@ exports.criarSessaoCheckout = async (req, res) => {
 
         const ev = dadosEventoBD.rows[0];
 
-        // LÓGICA DE PREÇO DINÂMICO:
-        // Prioriza o preço do banco. Se estiver vazio ou for o 50 de teste, usa o do site.
+        // LÓGICA DE PREÇO: Prioriza o banco, mas aceita o do site se o banco estiver zerado
         const precoUnitario = (ev.preco && Number(ev.preco) !== 0 && Number(ev.preco) !== 50.00) 
             ? Number(ev.preco) 
             : Number(evento.preco);
 
-        // CONFIGURAÇÃO DA SESSÃO COM STRIPE CHECKOUT
+        // CONFIGURAÇÃO DA SESSÃO - APENAS CARTÃO
         const sessionParams = {
-            // CORREÇÃO: 'card' engloba Apple/Google Pay. Adicionado 'pix' por ser Brasil.
-            payment_method_types: ['card', 'pix'],
+            payment_method_types: ['card'], // Apenas cartão (engloba Apple Pay automaticamente)
             customer_email: usuarioEmail,
             line_items: [{
                 price_data: {
@@ -37,7 +35,7 @@ exports.criarSessaoCheckout = async (req, res) => {
                     product_data: { 
                         name: `Ingresso: ${ev.nome}`,
                     },
-                    unit_amount: Math.round(precoUnitario * 100), // Stripe usa centavos
+                    unit_amount: Math.round(precoUnitario * 100),
                 },
                 quantity: parseInt(quantidade),
             }],
@@ -55,12 +53,10 @@ exports.criarSessaoCheckout = async (req, res) => {
             cancel_url: `${baseUrl}/venda?eventoId=${evento.id}&qtd=${quantidade}`,
         };
 
-        // SE O EVENTO TIVER UM PRODUTOR VINCULADO (STRIPE CONNECT - SPLIT)
+        // SPLIT DE PAGAMENTO (95% Produtor / 5% Linkah)
         if (ev.stripe_account_id) {
             sessionParams.payment_intent_data = {
-                // Sua taxa da Linkah (5% do total da venda)
                 application_fee_amount: Math.round((precoUnitario * 0.05) * 100 * quantidade),
-                // Destino dos 95% restantes (Conta do Produtor)
                 transfer_data: {
                     destination: ev.stripe_account_id,
                 },
@@ -76,7 +72,7 @@ exports.criarSessaoCheckout = async (req, res) => {
     }
 };
 
-// --- 2. WEBHOOK DA STRIPE (Processamento após sucesso) ---
+// --- 2. WEBHOOK DA STRIPE ---
 exports.webhookStripe = async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
@@ -92,7 +88,6 @@ exports.webhookStripe = async (req, res) => {
         const { usuarioEmail, tituloEvento, quantidade, eventoId, dataEvento, horaEvento, localEvento } = session.metadata;
 
         try {
-            // Salva a compra aprovada no banco de dados
             await db.query(`
                 INSERT INTO public.compras (
                     usuario_email, evento_id, evento_nome, data_evento, 
@@ -101,7 +96,6 @@ exports.webhookStripe = async (req, res) => {
                 VALUES ($1, $2, $3, CURRENT_DATE, $4, $5, 'Aprovado', $6)
             `, [usuarioEmail, eventoId, tituloEvento, parseInt(quantidade), session.amount_total / 100, session.id]);
 
-            // Envia o e-mail oficial com o link do ingresso
             const linkIngresso = `${process.env.FRONTEND_URL}/pagamento/sucesso?session_id=${session.id}`;
             await enviarIngressoEmail(usuarioEmail, {
                 tituloEvento,
@@ -112,37 +106,29 @@ exports.webhookStripe = async (req, res) => {
                 localEvento
             });
 
-            console.log(`✅ Ingresso enviado com sucesso para ${usuarioEmail}`);
+            console.log(`✅ Sucesso: ${usuarioEmail}`);
         } catch (error) {
-            console.error("❌ Erro no processamento do webhook:", error.message);
+            console.error("❌ Erro Webhook:", error.message);
         }
     }
     res.status(200).json({ received: true });
 };
 
-// --- 3. BUSCAR DETALHES (Para a tela de sucesso do Next.js) ---
+// --- 3. BUSCAR DETALHES ---
 exports.buscarDetalhesCompra = async (req, res) => {
     try {
         const { sessionId } = req.params;
         const result = await db.query(
-            `SELECT 
-                c.evento_nome, c.usuario_email, c.quantidade, c.valor_total, 
-                TO_CHAR(c.data_evento, 'DD/MM/YYYY') as data_evento_formatada,
-                e.hora_inicio as hora_evento,
-                e.local_nome as local_evento
+            `SELECT c.evento_nome, c.usuario_email, c.quantidade, c.valor_total, 
+                    TO_CHAR(c.data_evento, 'DD/MM/YYYY') as data_evento_formatada,
+                    e.hora_inicio as hora_evento, e.local_nome as local_evento
              FROM public.compras c
              LEFT JOIN public.eventos e ON e.id = c.evento_id
              WHERE c.stripe_session_id = $1`, 
             [sessionId]
         );
-
-        if (result.rows.length > 0) {
-            res.json(result.rows[0]);
-        } else {
-            res.status(404).json({ error: "Compra não encontrada." });
-        }
+        res.json(result.rows[0] || { error: "Não encontrado" });
     } catch (err) {
-        console.error("❌ Erro ao buscar detalhes:", err.message);
-        res.status(500).json({ error: "Erro interno no servidor." });
+        res.status(500).json({ error: err.message });
     }
 };
