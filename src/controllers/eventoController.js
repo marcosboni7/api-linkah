@@ -1,10 +1,9 @@
 const db = require('../config/database');
 
 // --- 1. LISTAR PARA VITRINE (SITE PÚBLICO) ---
-// --- LISTAR PARA VITRINE COM FILTRO DE CATEGORIA ---
 exports.listarTodosEventosParaVitrine = async (req, res) => {
   try {
-    const { categoria } = req.query; // Pega a categoria da URL: ?categoria=Teatro
+    const { categoria } = req.query;
     
     let query = `
       SELECT id, nome, categoria, local_nome, cidade, estado, imagem_capa, data_inicio 
@@ -57,11 +56,9 @@ exports.listarEventosPorProdutor = async (req, res) => {
   }
 };
 
-// --- 3. CRIAR EVENTO PRESENCIAL ---
+// --- 3. CRIAR EVENTO PRESENCIAL (CORRIGIDO FUSO HORÁRIO) ---
 exports.criarEventoPresencial = async (req, res) => {
-  let client;
   try {
-    // Usamos o pool para garantir que a conexão não "morra" no meio
     const {
       produtor_email, nome, categoria, status, descricao,
       data_inicio, hora_inicio, data_termino, hora_termino,
@@ -69,8 +66,7 @@ exports.criarEventoPresencial = async (req, res) => {
       cidade, estado, imagem_capa 
     } = req.body;
 
-    // Log de segurança para ver se a data está bizarra
-    console.log("📅 Tentando criar evento para data:", data_inicio);
+    console.log("📅 Recebendo data_inicio original:", data_inicio);
 
     const query = `
       INSERT INTO public.eventos (
@@ -83,12 +79,13 @@ exports.criarEventoPresencial = async (req, res) => {
       RETURNING id;
     `;
 
+    // Adicionamos T12:00:00Z para garantir que o fuso não volte o dia
     const values = [
       produtor_email, nome, categoria || 'Geral', status || 'Ativo', 
       descricao, 
-      data_inicio.substring(0, 10), // Força o formato YYYY-MM-DD
+      data_inicio.substring(0, 10) + 'T12:00:00Z', 
       hora_inicio, 
-      data_termino.substring(0, 10), 
+      data_termino.substring(0, 10) + 'T12:00:00Z', 
       hora_termino,
       local_nome, cep, endereco, numero, complemento, cidade, estado, imagem_capa
     ];
@@ -98,11 +95,8 @@ exports.criarEventoPresencial = async (req, res) => {
     return res.status(201).json({ id: result.rows[0].id });
 
   } catch (err) {
-    console.error("❌ ERRO CRÍTICO NO BANCO:", err.message);
-    return res.status(500).json({ 
-      error: "Erro ao salvar no banco de dados", 
-      detalhe: err.message 
-    });
+    console.error("❌ ERRO NO BANCO:", err.message);
+    return res.status(500).json({ error: "Erro ao salvar", detalhe: err.message });
   }
 };
 
@@ -118,20 +112,23 @@ exports.atualizarStatus = async (req, res) => {
   }
 };
 
-// --- 5. ATUALIZAR EVENTO ---
+// --- 5. ATUALIZAR EVENTO (CORRIGIDO FUSO HORÁRIO) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
   const campos = req.body;
   try {
-    // Uma forma simples de update dinâmico (opcional) ou fixa:
     const query = `
       UPDATE public.eventos 
       SET nome=$1, categoria=$2, descricao=$3, data_inicio=$4, local_nome=$5, imagem_capa=$6
       WHERE id=$7
     `;
+    
+    // Forçamos a correção aqui também para evitar erros ao editar
+    const dataCorrigida = campos.data_inicio.substring(0, 10) + 'T12:00:00Z';
+
     await db.query(query, [
       campos.nome, campos.categoria, campos.descricao, 
-      campos.data_inicio, campos.local_nome, campos.imagem_capa, id
+      dataCorrigida, campos.local_nome, campos.imagem_capa, id
     ]);
     return res.status(200).json({ message: "Evento atualizado" });
   } catch (err) {
@@ -170,9 +167,6 @@ exports.salvarIngressos = async (req, res) => {
   const { id } = req.params;
   const { ingressos } = req.body;
   try {
-    // Limpa ingressos antigos antes de salvar os novos se for uma atualização
-    // await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
-    
     for (const ing of ingressos) {
       await db.query(
         'INSERT INTO public.ingressos (evento_id, nome, preco, quantidade) VALUES ($1, $2, $3, $4)', 
