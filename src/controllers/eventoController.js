@@ -56,44 +56,44 @@ exports.listarEventosPorProdutor = async (req, res) => {
   }
 };
 
-// --- 3. CRIAR EVENTO PRESENCIAL (CORRIGIDO: SALVA INGRESSOS JUNTO) ---
+// --- 3. CRIAR EVENTO (PRESENCIAL OU ONLINE) ---
 exports.criarEventoPresencial = async (req, res) => {
   try {
     const {
       produtor_email, nome, categoria, status, descricao,
       data_inicio, hora_inicio, data_termino, hora_termino,
       local_nome, cep, endereco, numero, complemento,
-      cidade, estado, imagem_capa, ingressos // Recebendo ingressos aqui
+      cidade, estado, imagem_capa, ingressos, tipo, link_transmissao
     } = req.body;
 
-    // 1. Salva o Evento
+    // Limpeza de data para evitar bug de fuso horário (previne pular para o dia anterior)
+    const dataIniLimpa = data_inicio ? data_inicio.substring(0, 10) : null;
+    const dataFimLimpa = data_termino ? data_termino.substring(0, 10) : null;
+
     const queryEvento = `
       INSERT INTO public.eventos (
         produtor_email, nome, categoria, status, descricao,
         data_inicio, hora_inicio, data_termino, hora_termino,
         local_nome, cep, endereco, numero, complemento, 
-        cidade, estado, imagem_capa, tipo
+        cidade, estado, imagem_capa, tipo, link_transmissao
       ) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'Presencial')
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       RETURNING id;
     `;
-
-    // Limpeza de data para evitar bug de fuso horário (21h)
-    const dataIniLimpa = data_inicio ? data_inicio.substring(0, 10) : null;
-    const dataFimLimpa = data_termino ? data_termino.substring(0, 10) : null;
 
     const valuesEvento = [
       produtor_email, nome, categoria || 'Geral', status || 'Ativo', descricao, 
       dataIniLimpa, hora_inicio || '00:00:00', 
       dataFimLimpa, hora_termino || '23:59:59',
-      local_nome, cep, endereco, numero, complemento, cidade, estado, imagem_capa
+      local_nome, cep, endereco, numero, complemento, cidade, estado, imagem_capa,
+      tipo || 'Presencial', link_transmissao
     ];
 
     const resultEvento = await db.query(queryEvento, valuesEvento);
     const novoEventoId = resultEvento.rows[0].id;
 
-    // 2. Salva os Ingressos automaticamente se eles vierem no corpo da requisição
-    if (ingressos && Array.isArray(ingressos) && ingressos.length > 0) {
+    // Salva os Ingressos automaticamente se vierem no array
+    if (ingressos && Array.isArray(ingressos)) {
       for (const ing of ingressos) {
         await db.query(
           'INSERT INTO public.ingressos (evento_id, nome, preco, quantidade) VALUES ($1, $2, $3, $4)', 
@@ -102,102 +102,120 @@ exports.criarEventoPresencial = async (req, res) => {
       }
     }
 
-    return res.status(201).json({ id: novoEventoId, message: "Evento e ingressos criados com sucesso!" });
+    return res.status(201).json({ id: novoEventoId, message: "Evento criado com sucesso!" });
 
   } catch (err) {
     console.error("❌ ERRO AO CRIAR EVENTO:", err.message);
-    return res.status(500).json({ error: "Erro ao salvar evento e ingressos", detalhe: err.message });
+    return res.status(500).json({ error: "Erro ao salvar", detalhe: err.message });
   }
 };
 
-// --- 4. ATUALIZAR STATUS ---
+// --- 4. BUSCAR EVENTO POR ID (CORRIGIDO PARA O FRONT) ---
+exports.buscarEventoPorId = async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Join com produtores para o Front-end ter o nome do organizador
+    const query = `
+      SELECT e.*, p.nome as produtor_nome, p.foto_perfil as produtor_foto
+      FROM public.eventos e
+      LEFT JOIN public.produtores p ON e.produtor_email = p.email
+      WHERE e.id = $1
+    `;
+    
+    const result = await db.query(query, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Evento não encontrado" });
+    }
+
+    const evento = result.rows[0];
+
+    // Busca ingressos ordenados por preço
+    const resIng = await db.query(
+      'SELECT id, nome, preco, quantidade FROM public.ingressos WHERE evento_id = $1 ORDER BY preco ASC', 
+      [id]
+    );
+    
+    evento.ingressos = resIng.rows;
+
+    return res.status(200).json(evento);
+  } catch (err) { 
+    console.error("Erro ao buscar por ID:", err.message);
+    return res.status(500).json({ error: err.message }); 
+  }
+};
+
+// --- 5. ATUALIZAR EVENTO ---
+exports.atualizarEvento = async (req, res) => {
+  const { id } = req.params;
+  const { 
+    nome, categoria, descricao, data_inicio, hora_inicio, 
+    local_nome, imagem_capa, cidade, estado, tipo, link_transmissao
+  } = req.body;
+
+  try {
+    const dataLimpa = data_inicio ? data_inicio.substring(0, 10) : null;
+
+    const query = `
+      UPDATE public.eventos 
+      SET nome=$1, categoria=$2, descricao=$3, data_inicio=$4, 
+          local_nome=$5, imagem_capa=$6, cidade=$7, estado=$8, 
+          hora_inicio=$9, tipo=$10, link_transmissao=$11
+      WHERE id=$12
+    `;
+    
+    await db.query(query, [
+      nome, categoria, descricao, dataLimpa, 
+      local_nome, imagem_capa, cidade, estado, 
+      hora_inicio, tipo, link_transmissao, id
+    ]);
+
+    return res.status(200).json({ message: "Evento atualizado" });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// --- 6. SALVAR INGRESSOS (AVULSO) ---
+exports.salvarIngressos = async (req, res) => {
+  const { id } = req.params;
+  const { ingressos } = req.body;
+  try {
+    // Deleta os antigos para evitar duplicidade na edição
+    await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
+    
+    if (ingressos && Array.isArray(ingressos)) {
+      for (const ing of ingressos) {
+        await db.query(
+          'INSERT INTO public.ingressos (evento_id, nome, preco, quantidade) VALUES ($1, $2, $3, $4)', 
+          [id, ing.nome, ing.preco || 0, ing.quantidade || 0]
+        );
+      }
+    }
+    return res.status(201).json({ message: "Ingressos salvos!" });
+  } catch (err) { 
+    return res.status(500).json({ error: err.message }); 
+  }
+};
+
+// --- 7. ATUALIZAR STATUS E EXCLUIR ---
 exports.atualizarStatus = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
   try {
     await db.query('UPDATE public.eventos SET status = $1 WHERE id = $2', [status, id]);
-    return res.status(200).json({ message: "Status atualizado" });
+    return res.status(200).json({ message: "Status alterado" });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (CORRIGIDO) ---
-exports.atualizarEvento = async (req, res) => {
-  const { id } = req.params;
-  const { 
-    nome, categoria, descricao, data_inicio, hora_inicio, 
-    local_nome, imagem_capa, cidade, estado 
-  } = req.body;
-
-  try {
-    const query = `
-      UPDATE public.eventos 
-      SET nome=$1, categoria=$2, descricao=$3, data_inicio=$4, 
-          local_nome=$5, imagem_capa=$6, cidade=$7, estado=$8, hora_inicio=$9
-      WHERE id=$10
-    `;
-    
-    const dataLimpa = data_inicio ? data_inicio.substring(0, 10) : null;
-
-    await db.query(query, [
-      nome, categoria, descricao, dataLimpa, 
-      local_nome, imagem_capa, cidade, estado, hora_inicio, id
-    ]);
-
-    return res.status(200).json({ message: "Evento atualizado com sucesso" });
-  } catch (err) {
-    console.error("❌ ERRO AO ATUALIZAR:", err.message);
-    return res.status(500).json({ error: err.message });
-  }
-};
-
-// --- 6. BUSCAR EVENTO POR ID ---
-exports.buscarEventoPorId = async (req, res) => {
-  const { id } = req.params;
-  try {
-    const result = await db.query('SELECT * FROM public.eventos WHERE id = $1', [id]);
-    if (result.rows.length === 0) return res.status(404).json({ message: "Não encontrado" });
-    const evento = result.rows[0];
-    const resIng = await db.query('SELECT * FROM public.ingressos WHERE evento_id = $1', [id]);
-    evento.ingressos = resIng.rows;
-    return res.status(200).json(evento);
-  } catch (err) { 
-    return res.status(500).json({ error: err.message }); 
-  }
-};
-
-// --- 7. EXCLUIR EVENTO ---
 exports.excluirEvento = async (req, res) => {
   const { id } = req.params;
   try {
-    // IMPORTANTE: Se o seu banco não tiver ON DELETE CASCADE, 
-    // você precisa deletar os ingressos antes do evento.
-    await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
     await db.query('DELETE FROM public.eventos WHERE id = $1', [id]);
-    return res.status(200).json({ message: "Removido" });
+    return res.status(200).json({ message: "Removido com sucesso" });
   } catch (err) { 
-    return res.status(500).json({ error: err.message }); 
-  }
-};
-
-// --- 8. SALVAR INGRESSOS (INDIVIDUALMENTE SE NECESSÁRIO) ---
-exports.salvarIngressos = async (req, res) => {
-  const { id } = req.params;
-  const { ingressos } = req.body;
-  try {
-    // Limpa os antigos para não duplicar se for uma re-edição
-    await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
-    
-    for (const ing of ingressos) {
-      await db.query(
-        'INSERT INTO public.ingressos (evento_id, nome, preco, quantidade) VALUES ($1, $2, $3, $4)', 
-        [id, ing.nome, ing.preco || 0, ing.quantidade || 0]
-      );
-    }
-    return res.status(201).json({ message: "Ingressos salvos com sucesso" });
-  } catch (err) { 
-    console.error("Erro ao salvar ingressos:", err.message);
     return res.status(500).json({ error: err.message }); 
   }
 };
