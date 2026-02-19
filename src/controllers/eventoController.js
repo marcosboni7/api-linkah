@@ -1,13 +1,19 @@
 const db = require('../config/database');
 
-// --- LISTAR TODOS OS EVENTOS (VITRINE) ---
+// --- 1. LISTAR TODOS OS EVENTOS (VITRINE COM PREÇO) ---
 exports.listarTodosEventosParaVitrine = async (req, res) => {
   try {
+    // Adicionado LEFT JOIN para buscar o menor preço da tabela de ingressos
     const query = `
-      SELECT id, nome, imagem_capa, data_inicio, hora_inicio, local_nome, cidade, estado, categoria, tipo, status
-      FROM public.eventos 
-      WHERE status = 'Ativo'
-      ORDER BY data_inicio ASC
+      SELECT 
+        e.id, e.nome, e.imagem_capa, e.data_inicio, e.hora_inicio, 
+        e.local_nome, e.cidade, e.estado, e.categoria, e.tipo, e.status,
+        MIN(i.preco) as preco_minimo
+      FROM public.eventos e
+      LEFT JOIN public.ingressos i ON e.id = i.evento_id
+      WHERE e.status = 'Ativo'
+      GROUP BY e.id
+      ORDER BY e.id DESC
     `;
     const result = await db.query(query);
     return res.status(200).json(result.rows);
@@ -17,7 +23,7 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
   }
 };
 
-// --- LISTAR EVENTOS POR PRODUTOR (DASHBOARD) ---
+// --- 2. LISTAR EVENTOS POR PRODUTOR (DASHBOARD) ---
 exports.listarEventosPorProdutor = async (req, res) => {
   const { email } = req.query; 
   
@@ -43,11 +49,9 @@ exports.listarEventosPorProdutor = async (req, res) => {
   }
 };
 
-// --- BUSCAR EVENTO POR ID (PARA PÁGINA DE DETALHES) ---
+// --- 3. BUSCAR EVENTO POR ID (DETALHES) ---
 exports.buscarEventoPorId = async (req, res) => {
   const { id } = req.params;
-
-  // Garante que o ID é um número para não dar erro de sintaxe no Postgres
   const eventoId = parseInt(id);
 
   if (isNaN(eventoId)) {
@@ -71,13 +75,13 @@ exports.buscarEventoPorId = async (req, res) => {
 
     const evento = result.rows[0];
 
-    // Tratamento de Data seguro (formato YYYY-MM-DD)
+    // Tratamento de Data
     if (evento.data_inicio) {
       const d = new Date(evento.data_inicio);
       evento.data_inicio = d.toISOString().split('T')[0];
     }
 
-    // Tratamento de Hora seguro (HH:mm)
+    // Tratamento de Hora
     if (evento.hora_inicio) {
       evento.hora_inicio = evento.hora_inicio.toString().substring(0, 5);
     }
@@ -96,7 +100,24 @@ exports.buscarEventoPorId = async (req, res) => {
   }
 };
 
-// --- ATUALIZAR EVENTO ---
+// --- 4. CRIAR EVENTO PRESENCIAL ---
+exports.criarEventoPresencial = async (req, res) => {
+    const { nome, produtor_email, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado } = req.body;
+    try {
+        const query = `
+            INSERT INTO public.eventos 
+            (nome, produtor_email, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado, tipo, status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'presencial', 'Ativo')
+            RETURNING id
+        `;
+        const result = await db.query(query, [nome, produtor_email, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado]);
+        res.status(201).json({ message: "Evento criado!", id: result.rows[0].id });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// --- 5. ATUALIZAR EVENTO ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
   const { 
@@ -129,21 +150,38 @@ exports.atualizarEvento = async (req, res) => {
   }
 };
 
-// --- EXCLUIR EVENTO ---
+// --- 6. EXCLUIR EVENTO ---
 exports.excluirEvento = async (req, res) => {
   const { id } = req.params;
   try {
-    // Se o banco não tiver ON DELETE CASCADE, você precisaria deletar os ingressos primeiro aqui
     await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
     await db.query('DELETE FROM public.eventos WHERE id = $1', [id]);
-    
     res.status(200).json({ message: "Excluído com sucesso" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-// --- ATUALIZAR STATUS ---
+// --- 7. SALVAR INGRESSOS (PREÇOS) ---
+exports.salvarIngressos = async (req, res) => {
+  const { id } = req.params;
+  const { ingressos } = req.body;
+
+  try {
+    await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
+    for (const ing of ingressos) {
+      await db.query(
+        'INSERT INTO public.ingressos (evento_id, nome, preco, quantidade) VALUES ($1, $2, $3, $4)',
+        [id, ing.nome, ing.preco, ing.quantidade]
+      );
+    }
+    res.status(200).json({ message: "Ingressos salvos!" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// --- 8. ATUALIZAR STATUS ---
 exports.atualizarStatus = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
@@ -153,43 +191,4 @@ exports.atualizarStatus = async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-};
-
-// --- SALVAR INGRESSOS ---
-exports.salvarIngressos = async (req, res) => {
-  const { id } = req.params;
-  const { ingressos } = req.body; // Espera um array de objetos
-
-  try {
-    // Deleta os antigos e insere os novos (estratégia simples)
-    await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
-
-    for (const ing of ingressos) {
-      await db.query(
-        'INSERT INTO public.ingressos (evento_id, nome, preco, quantidade) VALUES ($1, $2, $3, $4)',
-        [id, ing.nome, ing.preco, ing.quantidade]
-      );
-    }
-
-    res.status(200).json({ message: "Ingressos salvos com sucesso" });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
-
-// --- CRIAR EVENTO PRESENCIAL ---
-exports.criarEventoPresencial = async (req, res) => {
-    const { nome, produtor_email, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado } = req.body;
-    try {
-        const query = `
-            INSERT INTO public.eventos 
-            (nome, produtor_email, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado, tipo, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'presencial', 'Ativo')
-            RETURNING id
-        `;
-        const result = await db.query(query, [nome, produtor_email, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado]);
-        res.status(201).json({ message: "Evento criado!", id: result.rows[0].id });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
 };
