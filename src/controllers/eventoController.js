@@ -3,6 +3,8 @@ const db = require('../config/database');
 // --- BUSCAR EVENTO POR ID ---
 exports.buscarEventoPorId = async (req, res) => {
   const { id } = req.params;
+  console.log(`[GET] Buscando evento ID: ${id}`);
+
   try {
     const query = `
       SELECT e.*, p.nome as produtor_nome, p.foto_perfil as produtor_foto
@@ -15,10 +17,12 @@ exports.buscarEventoPorId = async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ message: "Não encontrado" });
 
     const evento = result.rows[0];
+    
+    console.log("--- DADOS BRUTOS DO BANCO ---");
+    console.log("data_inicio (raw):", evento.data_inicio);
+    console.log("hora_inicio (raw):", evento.hora_inicio);
 
-    // --- CORREÇÃO AQUI: NÃO USE 'new Date()' ---
-    // Se o campo no banco for DATE ou TIMESTAMP, ele vem como objeto. 
-    // Convertemos para String e pegamos apenas os 10 primeiros caracteres (YYYY-MM-DD)
+    // Tratamento de Data
     if (evento.data_inicio) {
       const d = new Date(evento.data_inicio);
       const ano = d.getFullYear();
@@ -27,16 +31,22 @@ exports.buscarEventoPorId = async (req, res) => {
       evento.data_inicio = `${ano}-${mes}-${dia}`;
     }
 
-    // Garante que a hora_inicio não venha com fuso doido (pega apenas HH:mm)
-    if (evento.hora_inicio && typeof evento.hora_inicio === 'string') {
-      evento.hora_inicio = evento.hora_inicio.substring(0, 5);
+    // Tratamento de Hora
+    if (evento.hora_inicio) {
+      // Força virar string e pega apenas HH:mm
+      evento.hora_inicio = String(evento.hora_inicio).substring(0, 5);
     }
+
+    console.log("--- DADOS TRATADOS ENVIADOS PARA O FRONT ---");
+    console.log("data_inicio (final):", evento.data_inicio);
+    console.log("hora_inicio (final):", evento.hora_inicio);
 
     const resIng = await db.query('SELECT * FROM public.ingressos WHERE evento_id = $1 ORDER BY preco ASC', [id]);
     evento.ingressos = resIng.rows;
 
     return res.status(200).json(evento);
   } catch (err) { 
+    console.error("[ERRO GET]:", err.message);
     return res.status(500).json({ error: err.message }); 
   }
 };
@@ -46,12 +56,14 @@ exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
   const { nome, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado, tipo, link_transmissao } = req.body;
 
+  console.log(`[PUT] Atualizando evento ID: ${id}`);
+  console.log("BODY RECEBIDO DO FRONT:", { data_inicio, hora_inicio });
+
   try {
-    // Garante que estamos salvando apenas a data sem interferência de fuso
     const dataLimpa = data_inicio ? data_inicio.substring(0, 10) : null;
-    
-    // Garante que a hora seja apenas HH:mm
     const horaLimpa = hora_inicio ? hora_inicio.substring(0, 5) : null;
+
+    console.log("VALORES QUE SERÃO SALVOS NO DB:", { dataLimpa, horaLimpa });
 
     const query = `
       UPDATE public.eventos 
@@ -59,13 +71,18 @@ exports.atualizarEvento = async (req, res) => {
       WHERE id=$12
     `;
     
-    await db.query(query, [
-      nome, categoria, descricao, dataLimpa, local_nome, 
-      imagem_capa, cidade, estado, horaLimpa, tipo, link_transmissao, id
-    ]);
+    const values = [
+        nome, categoria, descricao, dataLimpa, local_nome, 
+        imagem_capa, cidade, estado, horaLimpa, tipo, link_transmissao, id
+    ];
+
+    const updateRes = await db.query(query, values);
+    
+    console.log("Resultado do UPDATE (rowCount):", updateRes.rowCount);
 
     return res.status(200).json({ message: "Evento atualizado com sucesso" });
   } catch (err) {
+    console.error("[ERRO PUT]:", err.message);
     return res.status(500).json({ error: err.message });
   }
 };
