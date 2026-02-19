@@ -17,37 +17,20 @@ const db = require('./src/config/database');
 const app = express();
 
 // --- 1. MIDDLEWARES DE SEGURANÇA E CORS ---
-const allowedOrigins = [
-  'https://linkah-frontend-ivory.vercel.app',
-  'https://linkah.com.br',
-  'https://www.linkah.com.br',
-  'http://localhost:3000'
-];
 
+// LIBERAÇÃO GERAL PARA TESTE (Evita o erro "Failed to fetch")
 app.use(cors({
-  origin: function (origin, callback) {
-    // Permite requisições sem origin (como apps mobile ou curl)
-    if (!origin) return callback(null, true);
-    
-    // Verifica se a origin está na lista ou se é um subdomínio da Vercel
-    const isAllowed = allowedOrigins.includes(origin) || origin.endsWith('.vercel.app');
-    
-    if (isAllowed) {
-      return callback(null, true);
-    } else {
-      console.log("🚫 CORS Bloqueado para:", origin);
-      return callback(new Error('CORS não permitido pela política do servidor'), false);
-    }
-  },
+  origin: '*', 
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Ajuste no Helmet para não quebrar o redirecionamento da Stripe
+// Ajuste no Helmet para não quebrar o redirecionamento da Stripe e permitir cross-origin
 app.use(helmet({ 
   contentSecurityPolicy: false,
-  crossOriginResourcePolicy: { policy: "cross-origin" }
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginEmbedderPolicy: false
 }));
 
 // --- 2. ROTA DE WEBHOOK (DEVE VIR ANTES DO EXPRESS.JSON) ---
@@ -64,8 +47,10 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // --- 4. INICIALIZAÇÃO E SINCRONIZAÇÃO DO BANCO ---
 const inicializarBanco = async () => {
   try {
-    console.log('⏳ Sincronizando tabelas com o banco de dados...');
-
+    console.log('--- 🔄 Iniciando Conexão com o Banco ---');
+    // Teste de conexão simples primeiro
+    await db.query('SELECT NOW()');
+    
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.produtores (
         email VARCHAR(255) PRIMARY KEY,
@@ -143,6 +128,7 @@ const inicializarBanco = async () => {
     `);
 
     console.log('✅ Estrutura do banco de dados verificada!');
+    console.log('🐘 BANCO DE DADOS CONECTADO COM SUCESSO!');
   } catch (err) {
     console.error('❌ ERRO NA INICIALIZAÇÃO DO BANCO:', err.message);
   }
@@ -150,11 +136,12 @@ const inicializarBanco = async () => {
 
 // --- 5. MONITORAMENTO DE REQUISIÇÕES ---
 app.use((req, res, next) => {
+  console.log(`📡 [${new Date().toISOString()}] ${req.method} ${req.url} - Origin: ${req.headers.origin}`);
   if (['POST', 'PUT'].includes(req.method) && req.url !== '/api/pagamentos/webhook') {
     const bodyLog = { ...req.body };
     if (bodyLog.foto_perfil) bodyLog.foto_perfil = "BASE64_OMITIDA";
     if (bodyLog.imagem_capa) bodyLog.imagem_capa = "BASE64_OMITIDA";
-    console.log(`📥 [${req.method}] ${req.url}:`, JSON.stringify(bodyLog));
+    console.log(`📥 Body:`, JSON.stringify(bodyLog));
   }
   next();
 });
@@ -170,8 +157,9 @@ app.use('/api/comunidade', comunidadeRoutes);
 app.get('/ping', (req, res) => res.status(200).json({ status: 'Linkah API Online', timestamp: new Date() }));
 
 // --- 7. START DO SERVIDOR ---
+// O Render exige process.env.PORT e o host 0.0.0.0
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, async () => {
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 Servidor rodando na porta: ${PORT}`);
   await inicializarBanco();
 });
