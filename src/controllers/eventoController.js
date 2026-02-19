@@ -5,8 +5,9 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
   try {
     const { categoria } = req.query;
     
+    // Adicionei hora_inicio aqui para a vitrine também carregar o horário certo
     let query = `
-      SELECT id, nome, categoria, local_nome, cidade, estado, imagem_capa, data_inicio 
+      SELECT id, nome, categoria, local_nome, cidade, estado, imagem_capa, data_inicio, hora_inicio 
       FROM public.eventos 
       WHERE status = 'Ativo'
     `;
@@ -56,7 +57,7 @@ exports.listarEventosPorProdutor = async (req, res) => {
   }
 };
 
-// --- 3. CRIAR EVENTO PRESENCIAL (CORREÇÃO DE DATA) ---
+// --- 3. CRIAR EVENTO PRESENCIAL ---
 exports.criarEventoPresencial = async (req, res) => {
   try {
     const {
@@ -77,7 +78,6 @@ exports.criarEventoPresencial = async (req, res) => {
       RETURNING id;
     `;
 
-    // .substring(0, 10) garante que salve apenas AAAA-MM-DD sem fuso horário
     const values = [
       produtor_email, 
       nome, 
@@ -119,7 +119,7 @@ exports.atualizarStatus = async (req, res) => {
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (CORREÇÃO DE DATA E CAMPOS COMPLETOS) ---
+// --- 5. ATUALIZAR EVENTO (CORRIGIDO: TRATAMENTO DE HORA) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
   const { 
@@ -128,6 +128,9 @@ exports.atualizarEvento = async (req, res) => {
   } = req.body;
 
   try {
+    // Log para você conferir nos logs do Render se a hora está chegando
+    console.log(`Atualizando evento ${id}. Hora recebida: ${hora_inicio}`);
+
     const query = `
       UPDATE public.eventos 
       SET nome=$1, categoria=$2, descricao=$3, data_inicio=$4, 
@@ -135,7 +138,7 @@ exports.atualizarEvento = async (req, res) => {
       WHERE id=$10
     `;
     
-    // Pegamos apenas a parte da data (AAAA-MM-DD) para não bugar o dia anterior
+    // Garante que a data seja apenas YYYY-MM-DD para evitar fusos horários
     const dataLimpa = data_inicio ? data_inicio.substring(0, 10) : null;
 
     await db.query(query, [
@@ -147,7 +150,7 @@ exports.atualizarEvento = async (req, res) => {
       imagem_capa, 
       cidade, 
       estado, 
-      hora_inicio,
+      hora_inicio, 
       id
     ]);
 
