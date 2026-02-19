@@ -56,7 +56,7 @@ exports.listarEventosPorProdutor = async (req, res) => {
   }
 };
 
-// --- 3. CRIAR EVENTO PRESENCIAL (COMPLETO) ---
+// --- 3. CRIAR EVENTO PRESENCIAL (CORREÇÃO DE DATA) ---
 exports.criarEventoPresencial = async (req, res) => {
   try {
     const {
@@ -77,15 +77,16 @@ exports.criarEventoPresencial = async (req, res) => {
       RETURNING id;
     `;
 
+    // .substring(0, 10) garante que salve apenas AAAA-MM-DD sem fuso horário
     const values = [
       produtor_email, 
       nome, 
       categoria || 'Geral', 
       status || 'Ativo', 
       descricao, 
-      data_inicio ? data_inicio.substring(0, 10) + 'T12:00:00Z' : null, 
+      data_inicio ? data_inicio.substring(0, 10) : null, 
       hora_inicio, 
-      data_termino ? data_termino.substring(0, 10) + 'T12:00:00Z' : null, 
+      data_termino ? data_termino.substring(0, 10) : null, 
       hora_termino,
       local_nome, 
       cep, 
@@ -118,7 +119,7 @@ exports.atualizarStatus = async (req, res) => {
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (TODOS OS CAMPOS) ---
+// --- 5. ATUALIZAR EVENTO (CORREÇÃO DE DATA E CAMPOS COMPLETOS) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
   const { 
@@ -134,13 +135,14 @@ exports.atualizarEvento = async (req, res) => {
       WHERE id=$10
     `;
     
-    const dataCorrigida = data_inicio ? data_inicio.substring(0, 10) + 'T12:00:00Z' : null;
+    // Pegamos apenas a parte da data (AAAA-MM-DD) para não bugar o dia anterior
+    const dataLimpa = data_inicio ? data_inicio.substring(0, 10) : null;
 
     await db.query(query, [
       nome, 
       categoria, 
       descricao, 
-      dataCorrigida, 
+      dataLimpa, 
       local_nome, 
       imagem_capa, 
       cidade, 
