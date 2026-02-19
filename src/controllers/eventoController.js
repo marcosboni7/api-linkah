@@ -22,7 +22,7 @@ exports.buscarEventoPorId = async (req, res) => {
     console.log("data_inicio (raw):", evento.data_inicio);
     console.log("hora_inicio (raw):", evento.hora_inicio);
 
-    // Tratamento de Data
+    // Tratamento de Data (Evita que o fuso mude o dia)
     if (evento.data_inicio) {
       const d = new Date(evento.data_inicio);
       const ano = d.getFullYear();
@@ -31,9 +31,8 @@ exports.buscarEventoPorId = async (req, res) => {
       evento.data_inicio = `${ano}-${mes}-${dia}`;
     }
 
-    // Tratamento de Hora
+    // Tratamento de Hora (Pega apenas HH:mm)
     if (evento.hora_inicio) {
-      // Força virar string e pega apenas HH:mm
       evento.hora_inicio = String(evento.hora_inicio).substring(0, 5);
     }
 
@@ -54,7 +53,10 @@ exports.buscarEventoPorId = async (req, res) => {
 // --- ATUALIZAR EVENTO ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
-  const { nome, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado, tipo, link_transmissao } = req.body;
+  const { 
+    nome, categoria, descricao, data_inicio, hora_inicio, 
+    local_nome, imagem_capa, cidade, estado, tipo, link_transmissao 
+  } = req.body;
 
   console.log(`[PUT] Atualizando evento ID: ${id}`);
   console.log("BODY RECEBIDO DO FRONT:", { data_inicio, hora_inicio });
@@ -65,9 +67,12 @@ exports.atualizarEvento = async (req, res) => {
 
     console.log("VALORES QUE SERÃO SALVOS NO DB:", { dataLimpa, horaLimpa });
 
+    // AJUSTE: Usando ::DATE e ::TIME para travar o formato no banco e ignorar Timezones
     const query = `
       UPDATE public.eventos 
-      SET nome=$1, categoria=$2, descricao=$3, data_inicio=$4, local_nome=$5, imagem_capa=$6, cidade=$7, estado=$8, hora_inicio=$9, tipo=$10, link_transmissao=$11
+      SET nome=$1, categoria=$2, descricao=$3, data_inicio=$4::DATE, 
+          local_nome=$5, imagem_capa=$6, cidade=$7, estado=$8, 
+          hora_inicio=$9::TIME, tipo=$10, link_transmissao=$11
       WHERE id=$12
     `;
     
@@ -79,6 +84,10 @@ exports.atualizarEvento = async (req, res) => {
     const updateRes = await db.query(query, values);
     
     console.log("Resultado do UPDATE (rowCount):", updateRes.rowCount);
+
+    if (updateRes.rowCount === 0) {
+      return res.status(404).json({ message: "Evento não encontrado para atualização" });
+    }
 
     return res.status(200).json({ message: "Evento atualizado com sucesso" });
   } catch (err) {
