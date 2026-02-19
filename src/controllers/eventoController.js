@@ -56,7 +56,7 @@ exports.listarEventosPorProdutor = async (req, res) => {
   }
 };
 
-// --- 3. CRIAR EVENTO PRESENCIAL (CORRIGIDO FUSO HORÁRIO) ---
+// --- 3. CRIAR EVENTO PRESENCIAL (COMPLETO) ---
 exports.criarEventoPresencial = async (req, res) => {
   try {
     const {
@@ -65,8 +65,6 @@ exports.criarEventoPresencial = async (req, res) => {
       local_nome, cep, endereco, numero, complemento,
       cidade, estado, imagem_capa 
     } = req.body;
-
-    console.log("📅 Recebendo data_inicio original:", data_inicio);
 
     const query = `
       INSERT INTO public.eventos (
@@ -79,23 +77,31 @@ exports.criarEventoPresencial = async (req, res) => {
       RETURNING id;
     `;
 
-    // Adicionamos T12:00:00Z para garantir que o fuso não volte o dia
     const values = [
-      produtor_email, nome, categoria || 'Geral', status || 'Ativo', 
+      produtor_email, 
+      nome, 
+      categoria || 'Geral', 
+      status || 'Ativo', 
       descricao, 
-      data_inicio.substring(0, 10) + 'T12:00:00Z', 
+      data_inicio ? data_inicio.substring(0, 10) + 'T12:00:00Z' : null, 
       hora_inicio, 
-      data_termino.substring(0, 10) + 'T12:00:00Z', 
+      data_termino ? data_termino.substring(0, 10) + 'T12:00:00Z' : null, 
       hora_termino,
-      local_nome, cep, endereco, numero, complemento, cidade, estado, imagem_capa
+      local_nome, 
+      cep, 
+      endereco, 
+      numero, 
+      complemento, 
+      cidade, 
+      estado, 
+      imagem_capa
     ];
 
     const result = await db.query(query, values);
-    console.log("✅ Evento criado com ID:", result.rows[0].id);
     return res.status(201).json({ id: result.rows[0].id });
 
   } catch (err) {
-    console.error("❌ ERRO NO BANCO:", err.message);
+    console.error("❌ ERRO AO CRIAR:", err.message);
     return res.status(500).json({ error: "Erro ao salvar", detalhe: err.message });
   }
 };
@@ -112,26 +118,40 @@ exports.atualizarStatus = async (req, res) => {
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (CORRIGIDO FUSO HORÁRIO) ---
+// --- 5. ATUALIZAR EVENTO (TODOS OS CAMPOS) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
-  const campos = req.body;
+  const { 
+    nome, categoria, descricao, data_inicio, hora_inicio, 
+    local_nome, imagem_capa, cidade, estado 
+  } = req.body;
+
   try {
     const query = `
       UPDATE public.eventos 
-      SET nome=$1, categoria=$2, descricao=$3, data_inicio=$4, local_nome=$5, imagem_capa=$6
-      WHERE id=$7
+      SET nome=$1, categoria=$2, descricao=$3, data_inicio=$4, 
+          local_nome=$5, imagem_capa=$6, cidade=$7, estado=$8, hora_inicio=$9
+      WHERE id=$10
     `;
     
-    // Forçamos a correção aqui também para evitar erros ao editar
-    const dataCorrigida = campos.data_inicio.substring(0, 10) + 'T12:00:00Z';
+    const dataCorrigida = data_inicio ? data_inicio.substring(0, 10) + 'T12:00:00Z' : null;
 
     await db.query(query, [
-      campos.nome, campos.categoria, campos.descricao, 
-      dataCorrigida, campos.local_nome, campos.imagem_capa, id
+      nome, 
+      categoria, 
+      descricao, 
+      dataCorrigida, 
+      local_nome, 
+      imagem_capa, 
+      cidade, 
+      estado, 
+      hora_inicio,
+      id
     ]);
-    return res.status(200).json({ message: "Evento atualizado" });
+
+    return res.status(200).json({ message: "Evento atualizado com sucesso" });
   } catch (err) {
+    console.error("❌ ERRO AO ATUALIZAR:", err.message);
     return res.status(500).json({ error: err.message });
   }
 };
