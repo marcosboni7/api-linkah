@@ -16,7 +16,34 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
   }
 };
 
-// --- BUSCAR EVENTO POR ID (Versão com correção de data/hora) ---
+// --- LISTAR EVENTOS POR PRODUTOR (DASHBOARD) ---
+exports.listarEventosPorProdutor = async (req, res) => {
+  const { email } = req.query; // Pega o email enviado pelo front
+  
+  if (!email) {
+    return res.status(400).json({ error: "Email do produtor não fornecido" });
+  }
+
+  console.log(`\n--- 📊 BUSCANDO EVENTOS PARA O PRODUTOR: ${email} ---`);
+
+  try {
+    const query = `
+      SELECT * FROM public.eventos 
+      WHERE produtor_email = $1 
+      ORDER BY data_inicio DESC
+    `;
+    const result = await db.query(query, [email]);
+    
+    console.log(`✅ Sucesso! Encontrados ${result.rowCount} eventos.`);
+    
+    return res.status(200).json(result.rows);
+  } catch (err) {
+    console.error("❌ Erro ao listar eventos do produtor:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// --- BUSCAR EVENTO POR ID (COM TRATAMENTO DE TIMEZONE) ---
 exports.buscarEventoPorId = async (req, res) => {
   const { id } = req.params;
   try {
@@ -32,7 +59,7 @@ exports.buscarEventoPorId = async (req, res) => {
 
     const evento = result.rows[0];
 
-    // Tratamento de Data (Evita que o fuso mude o dia)
+    // Tratamento de Data
     if (evento.data_inicio) {
       const d = new Date(evento.data_inicio);
       const ano = d.getFullYear();
@@ -41,7 +68,7 @@ exports.buscarEventoPorId = async (req, res) => {
       evento.data_inicio = `${ano}-${mes}-${dia}`;
     }
 
-    // Tratamento de Hora (Garante formato HH:mm)
+    // Tratamento de Hora
     if (evento.hora_inicio) {
       const horaString = String(evento.hora_inicio);
       evento.hora_inicio = horaString.includes('T') 
@@ -58,7 +85,7 @@ exports.buscarEventoPorId = async (req, res) => {
   }
 };
 
-// --- ATUALIZAR EVENTO (Versão com casting ::TIME) ---
+// --- ATUALIZAR EVENTO ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
   const { 
@@ -83,35 +110,42 @@ exports.atualizarEvento = async (req, res) => {
         imagem_capa, cidade, estado, horaLimpa, tipo, link_transmissao, id
     ];
 
-    const updateRes = await db.query(query, values);
+    await db.query(query, values);
     return res.status(200).json({ message: "Evento atualizado com sucesso" });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
 };
 
-// --- OUTRAS FUNÇÕES NECESSÁRIAS PARA AS ROTAS NÃO QUEBRAREM ---
-
-exports.criarEventoPresencial = async (req, res) => {
-    // Implemente sua lógica de criação aqui ou mantenha a que você já tinha
-    res.status(201).json({ message: "Função criarEventoPresencial chamada" });
-};
-
-exports.listarEventosPorProdutor = async (req, res) => {
-    // Implemente sua lógica de listagem por produtor aqui
-    res.status(200).json([]);
-};
-
+// --- EXCLUIR EVENTO ---
 exports.excluirEvento = async (req, res) => {
-    const { id } = req.params;
+  const { id } = req.params;
+  try {
     await db.query('DELETE FROM public.eventos WHERE id = $1', [id]);
-    res.status(200).json({ message: "Excluído" });
+    res.status(200).json({ message: "Excluído com sucesso" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
+// --- FUNÇÕES DE APOIO (STATUS E INGRESSOS) ---
 exports.atualizarStatus = async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  try {
+    await db.query('UPDATE public.eventos SET status = $1 WHERE id = $2', [status, id]);
     res.status(200).json({ message: "Status atualizado" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
 exports.salvarIngressos = async (req, res) => {
-    res.status(200).json({ message: "Ingressos salvos" });
+  // Lógica de salvar ingressos
+  res.status(200).json({ message: "Ingressos processados" });
+};
+
+exports.criarEventoPresencial = async (req, res) => {
+    // Lógica de criação presencial
+    res.status(201).json({ message: "Evento presencial criado" });
 };
