@@ -5,7 +5,6 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
   try {
     const { categoria } = req.query;
     
-    // Adicionei hora_inicio aqui para a vitrine também carregar o horário certo
     let query = `
       SELECT id, nome, categoria, local_nome, cidade, estado, imagem_capa, data_inicio, hora_inicio 
       FROM public.eventos 
@@ -57,17 +56,18 @@ exports.listarEventosPorProdutor = async (req, res) => {
   }
 };
 
-// --- 3. CRIAR EVENTO PRESENCIAL ---
+// --- 3. CRIAR EVENTO PRESENCIAL (CORRIGIDO: SALVA INGRESSOS JUNTO) ---
 exports.criarEventoPresencial = async (req, res) => {
   try {
     const {
       produtor_email, nome, categoria, status, descricao,
       data_inicio, hora_inicio, data_termino, hora_termino,
       local_nome, cep, endereco, numero, complemento,
-      cidade, estado, imagem_capa 
+      cidade, estado, imagem_capa, ingressos // Recebendo ingressos aqui
     } = req.body;
 
-    const query = `
+    // 1. Salva o Evento
+    const queryEvento = `
       INSERT INTO public.eventos (
         produtor_email, nome, categoria, status, descricao,
         data_inicio, hora_inicio, data_termino, hora_termino,
@@ -78,32 +78,35 @@ exports.criarEventoPresencial = async (req, res) => {
       RETURNING id;
     `;
 
-    const values = [
-      produtor_email, 
-      nome, 
-      categoria || 'Geral', 
-      status || 'Ativo', 
-      descricao, 
-      data_inicio ? data_inicio.substring(0, 10) : null, 
-      hora_inicio, 
-      data_termino ? data_termino.substring(0, 10) : null, 
-      hora_termino,
-      local_nome, 
-      cep, 
-      endereco, 
-      numero, 
-      complemento, 
-      cidade, 
-      estado, 
-      imagem_capa
+    // Limpeza de data para evitar bug de fuso horário (21h)
+    const dataIniLimpa = data_inicio ? data_inicio.substring(0, 10) : null;
+    const dataFimLimpa = data_termino ? data_termino.substring(0, 10) : null;
+
+    const valuesEvento = [
+      produtor_email, nome, categoria || 'Geral', status || 'Ativo', descricao, 
+      dataIniLimpa, hora_inicio || '00:00:00', 
+      dataFimLimpa, hora_termino || '23:59:59',
+      local_nome, cep, endereco, numero, complemento, cidade, estado, imagem_capa
     ];
 
-    const result = await db.query(query, values);
-    return res.status(201).json({ id: result.rows[0].id });
+    const resultEvento = await db.query(queryEvento, valuesEvento);
+    const novoEventoId = resultEvento.rows[0].id;
+
+    // 2. Salva os Ingressos automaticamente se eles vierem no corpo da requisição
+    if (ingressos && Array.isArray(ingressos) && ingressos.length > 0) {
+      for (const ing of ingressos) {
+        await db.query(
+          'INSERT INTO public.ingressos (evento_id, nome, preco, quantidade) VALUES ($1, $2, $3, $4)', 
+          [novoEventoId, ing.nome, ing.preco || 0, ing.quantidade || 0]
+        );
+      }
+    }
+
+    return res.status(201).json({ id: novoEventoId, message: "Evento e ingressos criados com sucesso!" });
 
   } catch (err) {
-    console.error("❌ ERRO AO CRIAR:", err.message);
-    return res.status(500).json({ error: "Erro ao salvar", detalhe: err.message });
+    console.error("❌ ERRO AO CRIAR EVENTO:", err.message);
+    return res.status(500).json({ error: "Erro ao salvar evento e ingressos", detalhe: err.message });
   }
 };
 
@@ -119,7 +122,7 @@ exports.atualizarStatus = async (req, res) => {
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (CORRIGIDO: TRATAMENTO DE HORA) ---
+// --- 5. ATUALIZAR EVENTO (CORRIGIDO) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
   const { 
@@ -128,9 +131,6 @@ exports.atualizarEvento = async (req, res) => {
   } = req.body;
 
   try {
-    // Log para você conferir nos logs do Render se a hora está chegando
-    console.log(`Atualizando evento ${id}. Hora recebida: ${hora_inicio}`);
-
     const query = `
       UPDATE public.eventos 
       SET nome=$1, categoria=$2, descricao=$3, data_inicio=$4, 
@@ -138,20 +138,11 @@ exports.atualizarEvento = async (req, res) => {
       WHERE id=$10
     `;
     
-    // Garante que a data seja apenas YYYY-MM-DD para evitar fusos horários
     const dataLimpa = data_inicio ? data_inicio.substring(0, 10) : null;
 
     await db.query(query, [
-      nome, 
-      categoria, 
-      descricao, 
-      dataLimpa, 
-      local_nome, 
-      imagem_capa, 
-      cidade, 
-      estado, 
-      hora_inicio, 
-      id
+      nome, categoria, descricao, dataLimpa, 
+      local_nome, imagem_capa, cidade, estado, hora_inicio, id
     ]);
 
     return res.status(200).json({ message: "Evento atualizado com sucesso" });
@@ -180,6 +171,9 @@ exports.buscarEventoPorId = async (req, res) => {
 exports.excluirEvento = async (req, res) => {
   const { id } = req.params;
   try {
+    // IMPORTANTE: Se o seu banco não tiver ON DELETE CASCADE, 
+    // você precisa deletar os ingressos antes do evento.
+    await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
     await db.query('DELETE FROM public.eventos WHERE id = $1', [id]);
     return res.status(200).json({ message: "Removido" });
   } catch (err) { 
@@ -187,18 +181,21 @@ exports.excluirEvento = async (req, res) => {
   }
 };
 
-// --- 8. SALVAR INGRESSOS ---
+// --- 8. SALVAR INGRESSOS (INDIVIDUALMENTE SE NECESSÁRIO) ---
 exports.salvarIngressos = async (req, res) => {
   const { id } = req.params;
   const { ingressos } = req.body;
   try {
+    // Limpa os antigos para não duplicar se for uma re-edição
+    await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
+    
     for (const ing of ingressos) {
       await db.query(
         'INSERT INTO public.ingressos (evento_id, nome, preco, quantidade) VALUES ($1, $2, $3, $4)', 
         [id, ing.nome, ing.preco || 0, ing.quantidade || 0]
       );
     }
-    return res.status(201).json({ message: "Salvo" });
+    return res.status(201).json({ message: "Ingressos salvos com sucesso" });
   } catch (err) { 
     console.error("Erro ao salvar ingressos:", err.message);
     return res.status(500).json({ error: err.message }); 
