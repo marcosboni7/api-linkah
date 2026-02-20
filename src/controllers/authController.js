@@ -59,12 +59,13 @@ exports.registerProdutor = async (req, res) => {
     }
 };
 
-// --- 2. LOGIN ---
+// --- 2. LOGIN OTIMIZADO (SEM DUPLA CHAMADA) ---
 exports.login = async (req, res) => {
     try {
         const email = (req.body.email || '').trim().toLowerCase();
         const senha = (req.body.senha || '').trim();
 
+        // Buscamos o usuário completo para validar o perfil logo de cara
         const result = await db.query('SELECT * FROM public.produtores WHERE LOWER(email) = $1 AND senha = $2', [email, senha]);
         
         if (result.rows.length === 0) {
@@ -72,11 +73,23 @@ exports.login = async (req, res) => {
         }
 
         const user = result.rows[0];
+
+        // Definimos se o perfil está completo (ex: tem CPF e CEP)
+        const perfilCompleto = !!(user.cpf_cnpj && user.cep);
+
         return res.status(200).json({ 
             message: "Login realizado!", 
-            user: { nome: user.nome, email: user.email, cpf_cnpj: user.cpf_cnpj } 
+            user: { 
+                nome: user.nome, 
+                email: user.email, 
+                cpf_cnpj: user.cpf_cnpj,
+                cep: user.cep,
+                telefone: user.telefone,
+                perfil_completo: perfilCompleto // Envia a flag pronta pro Frontend
+            } 
         });
     } catch (err) { 
+        console.error("❌ ERRO LOGIN:", err.message);
         return res.status(500).json({ message: "Erro no login" }); 
     }
 };
@@ -86,9 +99,14 @@ exports.getPerfil = async (req, res) => {
     try {
         const email = (req.query.email || '').trim().toLowerCase();
         const result = await db.query('SELECT * FROM public.produtores WHERE LOWER(email) = $1', [email]);
-        if (result.rows.length === 0) return res.status(404).json({ message: "Usuário não encontrado." });
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Usuário não encontrado." });
+        }
+        
         return res.status(200).json(result.rows[0]);
     } catch (err) { 
+        console.error("❌ ERRO BUSCAR PERFIL:", err.message);
         return res.status(500).json({ message: "Erro ao buscar perfil" }); 
     }
 };
@@ -97,10 +115,28 @@ exports.getPerfil = async (req, res) => {
 exports.updatePerfil = async (req, res) => {
     try {
         const { email_original, nome, cpf_cnpj, cep, rua, numero, bairro, estado, telefone } = req.body;
-        const query = `UPDATE public.produtores SET nome=$1, cpf_cnpj=$2, cep=$3, rua=$4, numero=$5, bairro=$6, estado=$7, telefone=$8 WHERE LOWER(email)=$9`;
-        await db.query(query, [nome, cpf_cnpj, cep, rua, numero, bairro, estado, telefone, email_original.toLowerCase()]);
+        
+        const query = `
+            UPDATE public.produtores 
+            SET nome=$1, cpf_cnpj=$2, cep=$3, rua=$4, numero=$5, bairro=$6, estado=$7, telefone=$8 
+            WHERE LOWER(email)=$9
+        `;
+        
+        await db.query(query, [
+            nome, 
+            cpf_cnpj, 
+            cep, 
+            rua, 
+            numero, 
+            bairro, 
+            estado, 
+            telefone, 
+            email_original.toLowerCase()
+        ]);
+
         return res.status(200).json({ message: "Perfil atualizado!" });
     } catch (err) { 
+        console.error("❌ ERRO ATUALIZAR PERFIL:", err.message);
         return res.status(500).json({ message: "Erro ao atualizar perfil" }); 
     }
 };
