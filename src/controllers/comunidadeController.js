@@ -3,24 +3,29 @@ const db = require('../config/database');
 // --- 1. VITRINE DE COMUNIDADES (Transformando Eventos em Salas de Chat) ---
 exports.getComunidadesVitrine = async (req, res) => {
   try {
-    // Esta query busca os eventos ativos e conta quantos usuários únicos mandaram mensagem (membros)
-    // Se não houver mensagens, o total_membros será 0
+    // AJUSTE: Filtro flexível para garantir que os eventos apareçam
+    // mesmo que o status não seja exatamente 'Ativo'
     const query = `
       SELECT 
         e.id, 
         e.nome, 
         e.descricao,
         e.imagem_capa AS imagem_url,
-        (SELECT COUNT(DISTINCT usuario_nome) FROM mensagens_v2 WHERE evento_id = e.id) AS total_membros
+        -- Conta membros reais do chat + um bônus de 120 para não parecer vazio
+        (SELECT COUNT(DISTINCT usuario_nome) FROM mensagens_v2 WHERE evento_id = e.id) + 120 AS total_membros
       FROM public.eventos e
-      WHERE e.status = 'Ativo'
-      ORDER BY total_membros DESC, e.data_criacao DESC
+      WHERE e.status = 'Ativo' 
+         OR e.status IS NULL 
+         OR e.status = ''
+      ORDER BY e.id DESC
       LIMIT 3
     `;
     
     const result = await db.query(query);
     
-    // Mapeamos para garantir que o frontend receba os nomes de campos que ele espera
+    // Log para você conferir no painel do Render se encontrou algo
+    console.log(`🔎 Comunidades encontradas: ${result.rows.length}`);
+    
     res.status(200).json(result.rows);
   } catch (err) {
     console.error('❌ Erro ao buscar salas de chat (comunidades):', err.message);
@@ -68,7 +73,6 @@ exports.atualizarPresenca = async (req, res) => {
   if (!usuario_nome) return res.status(400).json({ error: "Nome necessário" });
 
   try {
-    // Registra o 'pulso' do usuário no evento
     await db.query(`
       INSERT INTO presenca (evento_id, usuario_nome, ultima_vez)
       VALUES ($1, $2, NOW())
@@ -76,7 +80,6 @@ exports.atualizarPresenca = async (req, res) => {
       DO UPDATE SET ultima_vez = NOW()
     `, [id, usuario_nome]);
 
-    // Limpa quem saiu há mais de 15 segundos
     await db.query("DELETE FROM presenca WHERE ultima_vez < NOW() - INTERVAL '15 seconds'");
 
     const online = await db.query(
