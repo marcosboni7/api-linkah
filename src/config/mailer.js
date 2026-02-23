@@ -1,35 +1,31 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // false para porta 587
-  auth: {
-    user: 'marcosphara@gmail.com',
-    pass: 'kytyrxzjlgsxqvjq' 
-  },
-  tls: {
-    rejectUnauthorized: false // Ajuda a evitar bloqueios de certificados no Render
-  },
-  connectionTimeout: 20000, // Aumentamos para 20 segundos
-  greetingTimeout: 20000
-});
+// O Token deve estar no seu painel do Render (Environment Variables)
+const resend = new Resend(process.env.RESEND_API_KEY);
 
+/**
+ * Função genérica para enviar e-mails (Boas-vindas, Recuperação, etc.)
+ * Configurada para chegar em qualquer provedor.
+ */
 const sendMail = async (to, subject, html) => {
-  const mailOptions = {
-    from: '"LINKAH" <marcosphara@gmail.com>',
-    to,
-    subject,
-    html
-  };
-
   try {
-    const info = await transporter.sendMail(mailOptions);
-    console.log('✅ E-mail enviado com sucesso!');
-    return info;
+    const { data, error } = await resend.emails.send({
+      // IMPORTANTE: Agora que seu domínio está verificado, use @linkah.com.br
+      from: 'Linkah <contato@linkah.com.br>', 
+      to: [to],
+      subject: subject,
+      html: html,
+    });
+
+    if (error) {
+      console.error('❌ Erro retornado pelo Resend:', error.message);
+      return null;
+    }
+
+    console.log('✅ E-mail transacional enviado para:', to);
+    return data;
   } catch (error) {
-    console.error('❌ Erro real no envio:', error.message);
-    // Não vamos travar o registro se o e-mail falhar
+    console.error('❌ Erro crítico no envio (Resend):', error.message);
     return null; 
   }
 };

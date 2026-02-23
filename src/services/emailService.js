@@ -3,20 +3,19 @@ const { Resend } = require('resend');
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 /**
- * Envia o e-mail do ingresso com layout profissional
+ * Envia o e-mail do ingresso com layout profissional após confirmação do Pix/Cartão
  */
 const enviarIngressoEmail = async (emailCliente, dadosIngresso) => {
   try {
     const { data, error } = await resend.emails.send({
-      // Nome que aparece na caixa de entrada do cliente
-      from: 'Linkah Eventos <onboarding@resend.dev>',
-      to: emailCliente,
-      // Assunto personalizado com o nome do evento
+      // Usando seu domínio verificado para evitar o bloqueio do Gmail
+      from: 'Linkah Eventos <contato@linkah.com.br>', 
+      to: [emailCliente],
       subject: `🎟️ Seu ingresso para: ${dadosIngresso.tituloEvento}`,
       html: `
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; border: 1px solid #f1f5f9; border-radius: 24px; overflow: hidden; background-color: #ffffff; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);">
           
-          <div style="background: #f43f5e; padding: 30px; text-align: center;">
+          <div style="background: #C22973; padding: 30px; text-align: center;">
             <h1 style="color: white; margin: 0; font-style: italic; font-size: 32px; letter-spacing: -1px;">LINKAH.</h1>
           </div>
 
@@ -26,8 +25,8 @@ const enviarIngressoEmail = async (emailCliente, dadosIngresso) => {
                 Tudo pronto! Seu pagamento foi processado com sucesso. Abaixo estão os detalhes do seu evento:
             </p>
             
-            <div style="background: #fff1f2; padding: 25px; border-radius: 20px; border: 2px dashed #f43f5e; margin: 30px 0;">
-              <h3 style="margin: 0 0 15px 0; color: #f43f5e; text-transform: uppercase; font-size: 18px; letter-spacing: 1px;">
+            <div style="background: #fff1f2; padding: 25px; border-radius: 20px; border: 2px dashed #C22973; margin: 30px 0;">
+              <h3 style="margin: 0 0 15px 0; color: #C22973; text-transform: uppercase; font-size: 18px; letter-spacing: 1px;">
                 ${dadosIngresso.tituloEvento}
               </h3>
               
@@ -41,7 +40,7 @@ const enviarIngressoEmail = async (emailCliente, dadosIngresso) => {
 
             <div style="text-align: center; margin: 40px 0;">
               <a href="${dadosIngresso.linkIngresso}" 
-                 style="background: #f43f5e; color: white; padding: 18px 35px; text-decoration: none; border-radius: 16px; font-weight: bold; display: inline-block; font-size: 16px; box-shadow: 0 4px 12px rgba(244, 63, 94, 0.4);">
+                 style="background: #C22973; color: white; padding: 18px 35px; text-decoration: none; border-radius: 16px; font-weight: bold; display: inline-block; font-size: 16px; box-shadow: 0 4px 12px rgba(194, 41, 115, 0.4);">
                 ACESSAR MEU INGRESSO
               </a>
             </div>
@@ -62,13 +61,14 @@ const enviarIngressoEmail = async (emailCliente, dadosIngresso) => {
     });
 
     if (error) {
-        console.error('❌ Erro API Resend:', error);
+        console.error('❌ Erro API Resend no Ingresso:', error);
         return null;
     }
 
+    console.log('✅ Ingresso enviado com sucesso para:', emailCliente);
     return data;
   } catch (err) {
-    console.error('❌ Erro fatal no envio:', err.message);
+    console.error('❌ Erro fatal no envio do ingresso:', err.message);
     return null;
   }
 };
