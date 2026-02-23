@@ -10,6 +10,10 @@ const compraRoutes = require('./src/routes/compraRoutes');
 const pagamentoRoutes = require('./src/routes/pagamentoRoutes');
 const comunidadeRoutes = require('./src/routes/comunidadeRoutes');
 
+// --- NOVO: Rota de Usuários para o Staff ---
+const express = require('express');
+const routerUsuarios = express.Router();
+
 // CONTROLLERS
 const pagamentoController = require('./src/controllers/pagamentoController');
 const db = require('./src/config/database');
@@ -30,14 +34,14 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false
 }));
 
-// --- 2. ROTA DE WEBHOOK (DEVE VIR ANTES DO EXPRESS.JSON) ---
+// --- 2. ROTA DE WEBHOOK ---
 app.post(
   '/api/pagamentos/webhook',
   express.raw({ type: 'application/json' }),
   pagamentoController.webhookStripe
 );
 
-// --- 3. PARSERS JSON (PARA AS DEMAIS ROTAS) ---
+// --- 3. PARSERS JSON ---
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -47,8 +51,18 @@ const inicializarBanco = async () => {
     console.log('--- 🔄 Iniciando Conexão com o Banco ---');
     await db.query('SELECT NOW()');
     
-    // Ordem lógica: Produtores -> Eventos -> Ingressos/Compras/Mensagens
+    // Adicionei a tabela "usuarios" que estava faltando no seu script
     await db.query(`
+      CREATE TABLE IF NOT EXISTS public.usuarios (
+        id SERIAL PRIMARY KEY,
+        nome VARCHAR(255),
+        email VARCHAR(255) UNIQUE NOT NULL,
+        senha VARCHAR(255) NOT NULL,
+        role VARCHAR(50) DEFAULT 'user',
+        status VARCHAR(50) DEFAULT 'Ativo',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE TABLE IF NOT EXISTS public.produtores (
         email VARCHAR(255) PRIMARY KEY,
         nome VARCHAR(255) NOT NULL,
@@ -139,22 +153,54 @@ const inicializarBanco = async () => {
   }
 };
 
-// --- 5. MONITORAMENTO DE REQUISIÇÕES ---
+// --- 5. LOGICA DA ROTA DE USUÁRIOS (DIRETO NO SERVER PARA TESTE RÁPIDO) ---
+routerUsuarios.get('/', async (req, res) => {
+  try {
+    const result = await db.query('SELECT id, nome, email, role, status, created_at FROM public.usuarios ORDER BY id DESC');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+routerUsuarios.put('/:id', async (req, res) => {
+  const { id } = req.params;
+  const { nome, role, status, password } = req.body;
+  try {
+    if (password) {
+      await db.query(
+        'UPDATE public.usuarios SET nome = $1, role = $2, status = $3, senha = $4 WHERE id = $5',
+        [nome, role, status, password, id]
+      );
+    } else {
+      await db.query(
+        'UPDATE public.usuarios SET nome = $1, role = $2, status = $3 WHERE id = $4',
+        [nome, role, status, id]
+      );
+    }
+    res.json({ message: 'Atualizado com sucesso' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- 6. MONITORAMENTO ---
 app.use((req, res, next) => {
   console.log(`📡 [${new Date().toISOString()}] ${req.method} ${req.url}`);
   next();
 });
 
-// --- 6. ROTAS DA API ---
+// --- 7. REGISTRO DAS ROTAS ---
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 app.use('/api/compras', compraRoutes);
 app.use('/api/pagamentos', pagamentoRoutes);
 app.use('/api/comunidades', comunidadeRoutes); 
+app.use('/api/usuarios', routerUsuarios); // <-- AQUI ESTÁ A MÁGICA
 
 app.get('/ping', (req, res) => res.status(200).json({ status: 'Linkah API Online', timestamp: new Date() }));
 
-// --- 7. START DO SERVIDOR ---
+// --- 8. START ---
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 Servidor rodando na porta: ${PORT}`);
