@@ -125,6 +125,15 @@ const inicializarBanco = async () => {
         texto TEXT NOT NULL,
         criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP 
       );
+
+      CREATE TABLE IF NOT EXISTS public.comunidades (
+        id SERIAL PRIMARY KEY,
+        nome VARCHAR(255) NOT NULL,
+        descricao TEXT,
+        imagem_url TEXT,
+        total_membros INTEGER DEFAULT 0,
+        data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
     console.log('✅ Estrutura do banco de dados verificada!');
@@ -151,13 +160,12 @@ app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 app.use('/api/compras', compraRoutes);
 app.use('/api/pagamentos', pagamentoRoutes);
-app.use('/api/comunidade', comunidadeRoutes);
+app.use('/api/comunidades', comunidadeRoutes); // Corrigido para plural /comunidades
 
 // Rota de teste rápido
 app.get('/ping', (req, res) => res.status(200).json({ status: 'Linkah API Online', timestamp: new Date() }));
 
 // --- 7. START DO SERVIDOR ---
-// O Render exige process.env.PORT e o host 0.0.0.0
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 Servidor rodando na porta: ${PORT}`);
