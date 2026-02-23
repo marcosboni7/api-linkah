@@ -50,7 +50,7 @@ const inicializarBanco = async () => {
     console.log('--- 🔄 Iniciando Conexão com o Banco ---');
     await db.query('SELECT NOW()');
     
-    // Criação das tabelas
+    // Criação/Verificação das tabelas
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.usuarios (
         id SERIAL PRIMARY KEY,
@@ -145,14 +145,14 @@ const inicializarBanco = async () => {
       );
     `);
 
-    // --- CORREÇÃO DE COLUNAS FALTANTES ---
-    // Isso garante que se a tabela já existia sem essas colunas, elas sejam criadas agora.
+    // --- CORREÇÃO DE TODAS AS COLUNAS POSSÍVEIS ---
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'user'`);
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Ativo'`);
+    await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
 
-    console.log('✅ Estrutura verificada e 🐘 Banco Conectado!');
+    console.log('✅ Estrutura de usuários sincronizada com sucesso!');
   } catch (err) {
-    console.error('❌ ERRO BANCO:', err.message);
+    console.error('❌ ERRO NA SINCRONIZAÇÃO DO BANCO:', err.message);
   }
 };
 
@@ -162,18 +162,19 @@ routerUsuarios.get('/', async (req, res) => {
     const result = await db.query('SELECT id, nome, email, role, status, created_at FROM public.usuarios ORDER BY id DESC');
     res.json(result.rows);
   } catch (err) {
+    console.error("Erro GET /usuarios:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
 routerUsuarios.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const { nome, role, status, password } = req.body;
+  const { nome, role, status, senha } = req.body;
   try {
-    if (password) {
+    if (senha) {
       await db.query(
         'UPDATE public.usuarios SET nome = $1, role = $2, status = $3, senha = $4 WHERE id = $5',
-        [nome, role, status, password, id]
+        [nome, role, status, senha, id]
       );
     } else {
       await db.query(
@@ -183,6 +184,7 @@ routerUsuarios.put('/:id', async (req, res) => {
     }
     res.json({ message: 'OK' });
   } catch (err) {
+    console.error("Erro PUT /usuarios:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -193,7 +195,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// --- 7. ROTAS DA API ---
+// --- 7. REGISTRO DAS ROTAS ---
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 app.use('/api/compras', compraRoutes);
@@ -206,6 +208,6 @@ app.get('/ping', (req, res) => res.status(200).json({ status: 'Linkah API Online
 // --- 8. START ---
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`🚀 Servidor rodando na porta: ${PORT}`);
+  console.log(`🚀 Servidor Linkah rodando na porta: ${PORT}`);
   await inicializarBanco();
 });
