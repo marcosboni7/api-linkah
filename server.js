@@ -1,5 +1,5 @@
 require('dotenv').config();
-const express = require('express');
+const express = require('express'); // Declarado apenas uma vez aqui
 const cors = require('cors');
 const helmet = require('helmet');
 
@@ -10,15 +10,14 @@ const compraRoutes = require('./src/routes/compraRoutes');
 const pagamentoRoutes = require('./src/routes/pagamentoRoutes');
 const comunidadeRoutes = require('./src/routes/comunidadeRoutes');
 
-// --- NOVO: Rota de Usuários para o Staff ---
-const express = require('express');
-const routerUsuarios = express.Router();
-
 // CONTROLLERS
 const pagamentoController = require('./src/controllers/pagamentoController');
 const db = require('./src/config/database');
 
 const app = express();
+
+// --- NOVO: Router de Usuários para o Staff ---
+const routerUsuarios = express.Router();
 
 // --- 1. MIDDLEWARES DE SEGURANÇA E CORS ---
 app.use(cors({
@@ -45,13 +44,12 @@ app.post(
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// --- 4. INICIALIZAÇÃO E SINCRONIZAÇÃO DO BANCO ---
+// --- 4. INICIALIZAÇÃO DO BANCO ---
 const inicializarBanco = async () => {
   try {
     console.log('--- 🔄 Iniciando Conexão com o Banco ---');
     await db.query('SELECT NOW()');
     
-    // Adicionei a tabela "usuarios" que estava faltando no seu script
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.usuarios (
         id SERIAL PRIMARY KEY,
@@ -146,14 +144,13 @@ const inicializarBanco = async () => {
       );
     `);
 
-    console.log('✅ Estrutura do banco de dados verificada!');
-    console.log('🐘 BANCO DE DADOS CONECTADO COM SUCESSO!');
+    console.log('✅ Estrutura verificada e 🐘 Banco Conectado!');
   } catch (err) {
-    console.error('❌ ERRO NA INICIALIZAÇÃO DO BANCO:', err.message);
+    console.error('❌ ERRO BANCO:', err.message);
   }
 };
 
-// --- 5. LOGICA DA ROTA DE USUÁRIOS (DIRETO NO SERVER PARA TESTE RÁPIDO) ---
+// --- 5. LOGICA DA ROTA DE USUÁRIOS ---
 routerUsuarios.get('/', async (req, res) => {
   try {
     const result = await db.query('SELECT id, nome, email, role, status, created_at FROM public.usuarios ORDER BY id DESC');
@@ -178,7 +175,7 @@ routerUsuarios.put('/:id', async (req, res) => {
         [nome, role, status, id]
       );
     }
-    res.json({ message: 'Atualizado com sucesso' });
+    res.json({ message: 'OK' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -190,19 +187,19 @@ app.use((req, res, next) => {
   next();
 });
 
-// --- 7. REGISTRO DAS ROTAS ---
+// --- 7. ROTAS DA API ---
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 app.use('/api/compras', compraRoutes);
 app.use('/api/pagamentos', pagamentoRoutes);
 app.use('/api/comunidades', comunidadeRoutes); 
-app.use('/api/usuarios', routerUsuarios); // <-- AQUI ESTÁ A MÁGICA
+app.use('/api/usuarios', routerUsuarios); // Registro único
 
-app.get('/ping', (req, res) => res.status(200).json({ status: 'Linkah API Online', timestamp: new Date() }));
+app.get('/ping', (req, res) => res.status(200).json({ status: 'Linkah API Online' }));
 
 // --- 8. START ---
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`🚀 Servidor rodando na porta: ${PORT}`);
+  console.log(`🚀 Porta: ${PORT}`);
   await inicializarBanco();
 });
