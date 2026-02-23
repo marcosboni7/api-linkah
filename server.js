@@ -17,8 +17,6 @@ const db = require('./src/config/database');
 const app = express();
 
 // --- 1. MIDDLEWARES DE SEGURANÇA E CORS ---
-
-// LIBERAÇÃO GERAL PARA TESTE (Evita o erro "Failed to fetch")
 app.use(cors({
   origin: '*', 
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -26,7 +24,6 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Ajuste no Helmet para não quebrar o redirecionamento da Stripe e permitir cross-origin
 app.use(helmet({ 
   contentSecurityPolicy: false,
   crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -48,9 +45,9 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 const inicializarBanco = async () => {
   try {
     console.log('--- 🔄 Iniciando Conexão com o Banco ---');
-    // Teste de conexão simples primeiro
     await db.query('SELECT NOW()');
     
+    // Ordem lógica: Produtores -> Eventos -> Ingressos/Compras/Mensagens
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.produtores (
         email VARCHAR(255) PRIMARY KEY,
@@ -123,16 +120,15 @@ const inicializarBanco = async () => {
         evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE,
         usuario_nome VARCHAR(255) NOT NULL,
         texto TEXT NOT NULL,
+        imagem TEXT,
         criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP 
       );
 
-      CREATE TABLE IF NOT EXISTS public.comunidades (
-        id SERIAL PRIMARY KEY,
-        nome VARCHAR(255) NOT NULL,
-        descricao TEXT,
-        imagem_url TEXT,
-        total_membros INTEGER DEFAULT 0,
-        data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      CREATE TABLE IF NOT EXISTS public.presenca (
+        evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE,
+        usuario_nome VARCHAR(255) NOT NULL,
+        ultima_vez TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (evento_id, usuario_nome)
       );
     `);
 
@@ -145,13 +141,7 @@ const inicializarBanco = async () => {
 
 // --- 5. MONITORAMENTO DE REQUISIÇÕES ---
 app.use((req, res, next) => {
-  console.log(`📡 [${new Date().toISOString()}] ${req.method} ${req.url} - Origin: ${req.headers.origin}`);
-  if (['POST', 'PUT'].includes(req.method) && req.url !== '/api/pagamentos/webhook') {
-    const bodyLog = { ...req.body };
-    if (bodyLog.foto_perfil) bodyLog.foto_perfil = "BASE64_OMITIDA";
-    if (bodyLog.imagem_capa) bodyLog.imagem_capa = "BASE64_OMITIDA";
-    console.log(`📥 Body:`, JSON.stringify(bodyLog));
-  }
+  console.log(`📡 [${new Date().toISOString()}] ${req.method} ${req.url}`);
   next();
 });
 
@@ -160,9 +150,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 app.use('/api/compras', compraRoutes);
 app.use('/api/pagamentos', pagamentoRoutes);
-app.use('/api/comunidades', comunidadeRoutes); // Corrigido para plural /comunidades
+app.use('/api/comunidades', comunidadeRoutes); 
 
-// Rota de teste rápido
 app.get('/ping', (req, res) => res.status(200).json({ status: 'Linkah API Online', timestamp: new Date() }));
 
 // --- 7. START DO SERVIDOR ---
