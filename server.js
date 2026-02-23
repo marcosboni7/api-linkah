@@ -1,5 +1,5 @@
 require('dotenv').config();
-const express = require('express'); // Declarado apenas uma vez aqui
+const express = require('express'); 
 const cors = require('cors');
 const helmet = require('helmet');
 
@@ -50,6 +50,7 @@ const inicializarBanco = async () => {
     console.log('--- 🔄 Iniciando Conexão com o Banco ---');
     await db.query('SELECT NOW()');
     
+    // Criação das tabelas
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.usuarios (
         id SERIAL PRIMARY KEY,
@@ -144,6 +145,11 @@ const inicializarBanco = async () => {
       );
     `);
 
+    // --- CORREÇÃO DE COLUNAS FALTANTES ---
+    // Isso garante que se a tabela já existia sem essas colunas, elas sejam criadas agora.
+    await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'user'`);
+    await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Ativo'`);
+
     console.log('✅ Estrutura verificada e 🐘 Banco Conectado!');
   } catch (err) {
     console.error('❌ ERRO BANCO:', err.message);
@@ -193,13 +199,13 @@ app.use('/api/eventos', eventoRoutes);
 app.use('/api/compras', compraRoutes);
 app.use('/api/pagamentos', pagamentoRoutes);
 app.use('/api/comunidades', comunidadeRoutes); 
-app.use('/api/usuarios', routerUsuarios); // Registro único
+app.use('/api/usuarios', routerUsuarios); 
 
 app.get('/ping', (req, res) => res.status(200).json({ status: 'Linkah API Online' }));
 
 // --- 8. START ---
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`🚀 Porta: ${PORT}`);
+  console.log(`🚀 Servidor rodando na porta: ${PORT}`);
   await inicializarBanco();
 });
