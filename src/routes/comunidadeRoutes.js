@@ -2,15 +2,15 @@ const express = require('express');
 const router = express.Router();
 const comunidadeController = require('../controllers/comunidadeController');
 
-// 1. Lista as mensagens de um evento específico
-// (O parâmetro :evento_id deve ser o mesmo que o controller espera)
-router.get('/:evento_id', comunidadeController.listarMensagensPorEvento);
+// --- ROTA DA HOME (A que estava faltando!) ---
+// Quando o frontend der GET em /api/comunidades, ele cai aqui
+router.get('/', comunidadeController.getComunidadesVitrine);
 
-// 2. Envia a mensagem (Corrigido de 'salvarMensagem' para 'enviarMensagem')
+// --- ROTAS DO CHAT ---
+router.get('/:evento_id', comunidadeController.listarMensagensPorEvento);
 router.post('/enviar', comunidadeController.enviarMensagem);
 
-// 3. NOVA ROTA PARA USUÁRIOS ONLINE
-// (Utiliza o id do evento para verificar/atualizar quem está online)
+// --- ROTA DE PRESENÇA ---
 router.get('/:id/online', comunidadeController.atualizarPresenca);
 
 module.exports = router;
