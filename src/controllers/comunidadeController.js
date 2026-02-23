@@ -1,9 +1,20 @@
 const db = require('../config/database');
 
-// 1. Enviar nova mensagem (Texto + Imagem)
+// --- 1. VITRINE DE COMUNIDADES (Para a Home) ---
+exports.getComunidadesVitrine = async (req, res) => {
+  try {
+    // Busca 3 comunidades para destacar na Home
+    const result = await db.query('SELECT * FROM comunidades ORDER BY total_membros DESC LIMIT 3');
+    res.status(200).json(result.rows);
+  } catch (err) {
+    console.error('❌ Erro ao buscar vitrine de comunidades:', err.message);
+    res.status(500).json({ error: 'Erro ao buscar comunidades' });
+  }
+};
+
+// --- 2. ENVIAR MENSAGEM (Chat) ---
 exports.enviarMensagem = async (req, res) => {
   const { evento_id, usuario_nome, texto, imagem } = req.body;
-
   try {
     const query = `
       INSERT INTO mensagens_v2 (evento_id, usuario_nome, texto, imagem) 
@@ -12,7 +23,6 @@ exports.enviarMensagem = async (req, res) => {
     `;
     const values = [evento_id, usuario_nome, texto, imagem || null];
     const result = await db.query(query, values);
-    
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Erro ao salvar mensagem:', err);
@@ -20,7 +30,7 @@ exports.enviarMensagem = async (req, res) => {
   }
 };
 
-// 2. Listar mensagens do chat
+// --- 3. LISTAR MENSAGENS (Chat) ---
 exports.listarMensagensPorEvento = async (req, res) => {
   const { evento_id } = req.params;
   try {
@@ -35,15 +45,13 @@ exports.listarMensagensPorEvento = async (req, res) => {
   }
 };
 
-// 3. Sistema de Presença - QUEM ESTÁ ONLINE AGORA (Estilo Zoom)
+// --- 4. SISTEMA DE PRESENÇA (Online) ---
 exports.atualizarPresenca = async (req, res) => {
-  const { id } = req.params; // ID do evento
-  const { usuario_nome } = req.query; // Nome de quem está acessando
-
+  const { id } = req.params; 
+  const { usuario_nome } = req.query;
   if (!usuario_nome) return res.status(400).json({ error: "Nome necessário" });
 
   try {
-    // A. Registra ou Atualiza a presença do usuário (Heartbeat)
     await db.query(`
       INSERT INTO presenca (evento_id, usuario_nome, ultima_vez)
       VALUES ($1, $2, NOW())
@@ -51,15 +59,12 @@ exports.atualizarPresenca = async (req, res) => {
       DO UPDATE SET ultima_vez = NOW()
     `, [id, usuario_nome]);
 
-    // B. Limpa usuários que não dão sinal de vida há mais de 15 segundos
     await db.query("DELETE FROM presenca WHERE ultima_vez < NOW() - INTERVAL '15 seconds'");
 
-    // C. Busca todos que sobraram online neste evento
     const online = await db.query(
       "SELECT usuario_nome FROM presenca WHERE evento_id = $1", 
       [id]
     );
-
     res.json(online.rows);
   } catch (err) {
     console.error('Erro na presença:', err);
