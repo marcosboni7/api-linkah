@@ -50,7 +50,7 @@ const inicializarBanco = async () => {
     console.log('--- 🔄 Iniciando Conexão com o Banco ---');
     await db.query('SELECT NOW()');
     
-    // 1. Garante a existência de TODAS as tabelas
+    // 1. Garante a existência das tabelas (Estrutura Completa)
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.usuarios (
         id SERIAL PRIMARY KEY,
@@ -77,15 +77,6 @@ const inicializarBanco = async () => {
         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-      CREATE TABLE IF NOT EXISTS public.compras (
-        id SERIAL PRIMARY KEY,
-        usuario_email VARCHAR(255) NOT NULL,
-        evento_id INTEGER REFERENCES public.eventos(id) ON DELETE SET NULL,
-        valor_total DECIMAL(10,2),
-        status VARCHAR(50) DEFAULT 'Pendente',
-        criado_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
       CREATE TABLE IF NOT EXISTS public.mensagens_v2 (
         id SERIAL PRIMARY KEY,
         evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE,
@@ -105,37 +96,32 @@ const inicializarBanco = async () => {
       );
     `);
 
-    // --- 2. MIGRAÇÕES DE COLUNAS (PARA TABELAS JÁ EXISTENTES) ---
+    // --- 2. MIGRAÇÕES FORÇADAS (Para bancos que já existem mas estão incompletos) ---
 
     // Usuários e Produtores
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'user'`);
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Ativo'`);
-    await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
     await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'produtor'`);
     await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Ativo'`);
 
-    // --- CORREÇÕES NA TABELA mensagens_v2 (CHAT) ---
+    // --- CORREÇÃO FINAL DA TABELA mensagens_v2 (BLINDAGEM TOTAL) ---
     try {
-        // Garante evento_id
         await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE`);
-        
-        // CORREÇÃO DO SEU ÚLTIMO ERRO: Garante usuario_nome
         await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS usuario_nome VARCHAR(255)`);
-        
-        // Garante criado_em
+        await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS texto TEXT`); // <--- RESOLVE O ERRO ATUAL
+        await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS imagem TEXT`);
+        await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS tipo VARCHAR(50) DEFAULT 'chat'`);
         await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
         
-        console.log('✅ Colunas de mensagens_v2 sincronizadas (evento_id, usuario_nome, criado_em).');
-    } catch (e) { 
-        console.log('Nota: Algumas migrações de mensagens_v2 já foram feitas.'); 
+        console.log('✅ Estrutura de mensagens_v2 totalmente blindada!');
+    } catch (e) {
+        console.log('Nota: Algumas colunas já existiam.');
     }
 
-    // Presença (Garante a Unique Constraint para o ON CONFLICT)
+    // Presença
     try {
         await db.query(`ALTER TABLE public.presenca ADD CONSTRAINT unique_presenca UNIQUE (evento_id, usuario_nome)`);
-    } catch (e) { 
-        console.log('Nota: Constraint de presença já existe.'); 
-    }
+    } catch (e) { }
 
     console.log('✅ Banco de dados sincronizado e pronto!');
   } catch (err) {
@@ -155,7 +141,6 @@ routerUsuarios.get('/', async (req, res) => {
     const result = await db.query(query);
     res.json(result.rows);
   } catch (err) {
-    console.error("Erro ao listar membros:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
