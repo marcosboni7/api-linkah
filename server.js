@@ -50,7 +50,7 @@ const inicializarBanco = async () => {
     console.log('--- 🔄 Iniciando Conexão com o Banco ---');
     await db.query('SELECT NOW()');
     
-    // Garante que todas as tabelas existam
+    // Garante que todas as tabelas base existam
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.usuarios (
         id SERIAL PRIMARY KEY,
@@ -85,16 +85,34 @@ const inicializarBanco = async () => {
         status VARCHAR(50) DEFAULT 'Pendente',
         criado_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS public.mensagens_v2 (
+        id SERIAL PRIMARY KEY,
+        evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE,
+        usuario_nome VARCHAR(255) NOT NULL,
+        texto TEXT,
+        imagem TEXT,
+        tipo VARCHAR(50) DEFAULT 'chat',
+        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
-    // --- CORREÇÃO DE COLUNAS (MIGRAÇÃO AUTOMÁTICA) ---
-    // Adiciona colunas de controle caso elas não existam em nenhuma das duas tabelas
+    // --- CORREÇÕES E MIGRAÇÕES AUTOMÁTICAS ---
+    
+    // Colunas de usuários/produtores
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'user'`);
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Ativo'`);
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
-    
     await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'produtor'`);
     await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Ativo'`);
+
+    // CORREÇÃO CRÍTICA: Garante que evento_id existe na mensagens_v2
+    try {
+        await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE`);
+        console.log('✅ Verificação de coluna evento_id concluída.');
+    } catch (errCol) {
+        console.log('Nota: Migração de coluna mensagens_v2 já realizada ou desnecessária.');
+    }
 
     console.log('✅ Banco de dados sincronizado e pronto!');
   } catch (err) {
@@ -102,10 +120,9 @@ const inicializarBanco = async () => {
   }
 };
 
-// --- 5. LÓGICA DA ROTA DE USUÁRIOS (O CORAÇÃO DO SEU STAFF) ---
+// --- 5. LÓGICA DA ROTA DE USUÁRIOS (PAINEL STAFF) ---
 routerUsuarios.get('/', async (req, res) => {
   try {
-    // Busca de ambas as tabelas e une os resultados
     const query = `
       SELECT nome, email, role, status, data_criacao as created_at FROM public.produtores
       UNION ALL
@@ -120,13 +137,11 @@ routerUsuarios.get('/', async (req, res) => {
   }
 });
 
-// Rota para Banir ou Alterar Dados (Staff)
 routerUsuarios.put('/:id_ou_email', async (req, res) => {
   const { id_ou_email } = req.params;
   const { nome, role, status, senha } = req.body;
 
   try {
-    // Tenta atualizar na tabela usuarios (pelo ID ou Email)
     const updateUsers = senha 
       ? 'UPDATE public.usuarios SET nome = $1, role = $2, status = $3, senha = $4 WHERE id::text = $5 OR email = $5'
       : 'UPDATE public.usuarios SET nome = $1, role = $2, status = $3 WHERE id::text = $4 OR email = $4';
@@ -134,7 +149,6 @@ routerUsuarios.put('/:id_ou_email', async (req, res) => {
     const paramsUsers = senha ? [nome, role, status, senha, id_ou_email] : [nome, role, status, id_ou_email];
     const resUsers = await db.query(updateUsers, paramsUsers);
 
-    // Se não afetou ninguém na tabela usuarios, tenta na tabela produtores
     if (resUsers.rowCount === 0) {
       const updateProd = 'UPDATE public.produtores SET nome = $1, role = $2, status = $3 WHERE email = $4';
       await db.query(updateProd, [nome, role, status, id_ou_email]);
@@ -159,7 +173,7 @@ app.use('/api/eventos', eventoRoutes);
 app.use('/api/compras', compraRoutes);
 app.use('/api/pagamentos', pagamentoRoutes);
 app.use('/api/comunidades', comunidadeRoutes); 
-app.use('/api/usuarios', routerUsuarios); // Painel Staff
+app.use('/api/usuarios', routerUsuarios);
 
 app.get('/ping', (req, res) => res.status(200).json({ status: 'Linkah API Online', timestamp: new Date() }));
 
