@@ -50,7 +50,7 @@ const inicializarBanco = async () => {
     console.log('--- 🔄 Iniciando Conexão com o Banco ---');
     await db.query('SELECT NOW()');
     
-    // Garante que todas as tabelas base existam
+    // Garante que todas as tabelas existam
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.usuarios (
         id SERIAL PRIMARY KEY,
@@ -97,21 +97,20 @@ const inicializarBanco = async () => {
       );
     `);
 
-    // --- CORREÇÕES E MIGRAÇÕES AUTOMÁTICAS ---
-    
-    // Colunas de usuários/produtores
+    // --- CORREÇÕES E MIGRAÇÕES AUTOMÁTICAS (MANTENDO TUDO) ---
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'user'`);
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Ativo'`);
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
     await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'produtor'`);
     await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Ativo'`);
 
-    // CORREÇÃO CRÍTICA: Garante que evento_id existe na mensagens_v2
+    // --- CORREÇÃO DE COLUNAS DA COMUNIDADE (O QUE CAUSA OS ERROS ATUAIS) ---
     try {
         await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE`);
-        console.log('✅ Verificação de coluna evento_id concluída.');
-    } catch (errCol) {
-        console.log('Nota: Migração de coluna mensagens_v2 já realizada ou desnecessária.');
+        await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
+        console.log('✅ Colunas da mensagens_v2 (evento_id, criado_em) verificadas!');
+    } catch (e) {
+        console.log('Nota: Algumas migrações já haviam sido aplicadas.');
     }
 
     console.log('✅ Banco de dados sincronizado e pronto!');
@@ -173,7 +172,7 @@ app.use('/api/eventos', eventoRoutes);
 app.use('/api/compras', compraRoutes);
 app.use('/api/pagamentos', pagamentoRoutes);
 app.use('/api/comunidades', comunidadeRoutes); 
-app.use('/api/usuarios', routerUsuarios);
+app.use('/api/usuarios', routerUsuarios); // Painel Staff
 
 app.get('/ping', (req, res) => res.status(200).json({ status: 'Linkah API Online', timestamp: new Date() }));
 
