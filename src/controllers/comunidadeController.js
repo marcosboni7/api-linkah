@@ -2,12 +2,10 @@ const db = require('../config/database');
 
 /**
  * 1. VITRINE DE COMUNIDADES
- * Transforma seus eventos em "Salas de Chat" para a Home.
+ * Retorna as salas de chat para a Home.
  */
 exports.getComunidadesVitrine = async (req, res) => {
   try {
-    // Buscamos da tabela public.eventos (que você confirmou estar funcionando)
-    // O SELECT inclui uma contagem de membros fake (+120) para dar volume visual
     const query = `
       SELECT 
         e.id, 
@@ -24,48 +22,44 @@ exports.getComunidadesVitrine = async (req, res) => {
     `;
     
     const result = await db.query(query);
-    
-    // Log útil para monitorar no Render se a query está trazendo dados
-    console.log(`📡 API Comunidades: ${result.rows.length} salas enviadas para o frontend.`);
-    
+    console.log(`📡 API Comunidades: ${result.rows.length} salas enviadas.`);
     res.status(200).json(result.rows);
   } catch (err) {
-    console.error('❌ Erro no Controller de Comunidades (Vitrine):', err.message);
-    res.status(500).json({ error: 'Erro ao carregar salas de chat' });
+    console.error('❌ Erro na Vitrine:', err.message);
+    res.status(500).json({ error: 'Erro ao carregar salas' });
   }
 };
 
 /**
  * 2. ENVIAR MENSAGEM
- * Salva a interação do usuário no banco.
+ * Suporta chat comum e mensagens de sistema (tipo: 'status').
  */
 exports.enviarMensagem = async (req, res) => {
-  const { evento_id, usuario_nome, texto, imagem } = req.body;
+  const { evento_id, usuario_nome, texto, imagem, tipo } = req.body;
   
-  // Validação básica
   if (!evento_id || !usuario_nome || !texto) {
     return res.status(400).json({ error: "Campos obrigatórios faltando." });
   }
 
   try {
     const query = `
-      INSERT INTO public.mensagens_v2 (evento_id, usuario_nome, texto, imagem) 
-      VALUES ($1, $2, $3, $4) 
+      INSERT INTO public.mensagens_v2 (evento_id, usuario_nome, texto, imagem, tipo) 
+      VALUES ($1, $2, $3, $4, $5) 
       RETURNING *
     `;
-    const values = [evento_id, usuario_nome, texto, imagem || null];
+    // 'chat' é o padrão se o tipo não for enviado
+    const values = [evento_id, usuario_nome, texto, imagem || null, tipo || 'chat'];
     const result = await db.query(query, values);
     
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('❌ Erro ao salvar mensagem:', err.message);
-    res.status(500).json({ error: 'Erro interno ao salvar mensagem' });
+    res.status(500).json({ error: 'Erro ao salvar mensagem' });
   }
 };
 
 /**
  * 3. LISTAR MENSAGENS
- * Carrega o histórico do chat de um evento específico.
  */
 exports.listarMensagensPorEvento = async (req, res) => {
   const { evento_id } = req.params;
@@ -76,7 +70,6 @@ exports.listarMensagensPorEvento = async (req, res) => {
       ORDER BY criado_em ASC
     `;
     const result = await db.query(query, [evento_id]);
-    
     res.json(result.rows);
   } catch (err) {
     console.error('❌ Erro ao listar mensagens:', err.message);
@@ -85,32 +78,31 @@ exports.listarMensagensPorEvento = async (req, res) => {
 };
 
 /**
- * 4. SISTEMA DE PRESENÇA
- * Gerencia quem está online nos últimos 15 segundos.
+ * 4. SISTEMA DE PRESENÇA (REVISADO)
+ * Gerencia o "quem está online" em tempo real.
  */
 exports.atualizarPresenca = async (req, res) => {
   const { id } = req.params; // ID do evento
   const { usuario_nome } = req.query;
 
-  if (!usuario_nome) {
-    return res.status(400).json({ error: "Nome do usuário é necessário." });
-  }
-
   try {
-    // 1. Registra ou atualiza o pulso do usuário
-    await db.query(`
-      INSERT INTO public.presenca (evento_id, usuario_nome, ultima_vez)
-      VALUES ($1, $2, NOW())
-      ON CONFLICT (evento_id, usuario_nome) 
-      DO UPDATE SET ultima_vez = NOW()
-    `, [id, usuario_nome]);
+    // 1. Só registra se o nome for válido e não for string "undefined" do front
+    if (usuario_nome && usuario_nome !== 'undefined' && usuario_nome !== 'null') {
+      await db.query(`
+        INSERT INTO public.presenca (evento_id, usuario_nome, ultima_vez)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (evento_id, usuario_nome) 
+        DO UPDATE SET ultima_vez = NOW()
+      `, [id, usuario_nome]);
+    }
 
-    // 2. Remove usuários inativos (limpeza automática)
-    await db.query("DELETE FROM public.presenca WHERE ultima_vez < NOW() - INTERVAL '15 seconds'");
+    // 2. Limpeza: Remove quem não deu sinal de vida nos últimos 20 segundos
+    // Aumentamos para 20s para evitar que usuários com net lenta sumam muito rápido
+    await db.query("DELETE FROM public.presenca WHERE ultima_vez < NOW() - INTERVAL '20 seconds'");
 
-    // 3. Retorna a lista de quem sobrou (está online)
+    // 3. Retorna a lista de nomes únicos que sobraram
     const online = await db.query(
-      "SELECT usuario_nome FROM public.presenca WHERE evento_id = $1", 
+      "SELECT DISTINCT usuario_nome FROM public.presenca WHERE evento_id = $1", 
       [id]
     );
 
