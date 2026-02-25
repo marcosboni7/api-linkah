@@ -50,7 +50,7 @@ const inicializarBanco = async () => {
     console.log('--- 🔄 Iniciando Conexão com o Banco ---');
     await db.query('SELECT NOW()');
     
-    // Garante que todas as tabelas existam
+    // 1. Garante a existência de TODAS as tabelas
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.usuarios (
         id SERIAL PRIMARY KEY,
@@ -95,23 +95,35 @@ const inicializarBanco = async () => {
         tipo VARCHAR(50) DEFAULT 'chat',
         criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS public.presenca (
+        id SERIAL PRIMARY KEY,
+        evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE,
+        usuario_nome VARCHAR(255) NOT NULL,
+        ultima_vez TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT unique_presenca UNIQUE (evento_id, usuario_nome)
+      );
     `);
 
-    // --- CORREÇÕES E MIGRAÇÕES AUTOMÁTICAS (MANTENDO TUDO) ---
+    // --- 2. MIGRAÇÕES DE COLUNAS (PARA TABELAS JÁ EXISTENTES) ---
+
+    // Usuários e Produtores
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'user'`);
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Ativo'`);
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
     await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'produtor'`);
     await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Ativo'`);
 
-    // --- CORREÇÃO DE COLUNAS DA COMUNIDADE (O QUE CAUSA OS ERROS ATUAIS) ---
+    // Mensagens e Chat
     try {
         await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE`);
         await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
-        console.log('✅ Colunas da mensagens_v2 (evento_id, criado_em) verificadas!');
-    } catch (e) {
-        console.log('Nota: Algumas migrações já haviam sido aplicadas.');
-    }
+    } catch (e) { console.log('Nota: Migrações de colunas de mensagens já aplicadas.'); }
+
+    // Presença (Garante a Unique Constraint para o ON CONFLICT não dar erro)
+    try {
+        await db.query(`ALTER TABLE public.presenca ADD CONSTRAINT unique_presenca UNIQUE (evento_id, usuario_nome)`);
+    } catch (e) { console.log('Nota: Constraint de presença já existe.'); }
 
     console.log('✅ Banco de dados sincronizado e pronto!');
   } catch (err) {
@@ -139,23 +151,19 @@ routerUsuarios.get('/', async (req, res) => {
 routerUsuarios.put('/:id_ou_email', async (req, res) => {
   const { id_ou_email } = req.params;
   const { nome, role, status, senha } = req.body;
-
   try {
     const updateUsers = senha 
       ? 'UPDATE public.usuarios SET nome = $1, role = $2, status = $3, senha = $4 WHERE id::text = $5 OR email = $5'
       : 'UPDATE public.usuarios SET nome = $1, role = $2, status = $3 WHERE id::text = $4 OR email = $4';
-    
     const paramsUsers = senha ? [nome, role, status, senha, id_ou_email] : [nome, role, status, id_ou_email];
     const resUsers = await db.query(updateUsers, paramsUsers);
-
+    
     if (resUsers.rowCount === 0) {
       const updateProd = 'UPDATE public.produtores SET nome = $1, role = $2, status = $3 WHERE email = $4';
       await db.query(updateProd, [nome, role, status, id_ou_email]);
     }
-
     res.json({ message: 'Membro atualizado com sucesso!' });
   } catch (err) {
-    console.error("Erro ao editar membro:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -172,7 +180,7 @@ app.use('/api/eventos', eventoRoutes);
 app.use('/api/compras', compraRoutes);
 app.use('/api/pagamentos', pagamentoRoutes);
 app.use('/api/comunidades', comunidadeRoutes); 
-app.use('/api/usuarios', routerUsuarios); // Painel Staff
+app.use('/api/usuarios', routerUsuarios);
 
 app.get('/ping', (req, res) => res.status(200).json({ status: 'Linkah API Online', timestamp: new Date() }));
 
