@@ -150,3 +150,33 @@ exports.buscarDetalhesCompra = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+
+// --- 4. LISTAR TODOS OS INGRESSOS DE UM USUÁRIO (Para o Modal da Navbar) ---
+exports.listarMeusIngressos = async (req, res) => {
+    try {
+        const { email } = req.query;
+
+        if (!email) {
+            return res.status(400).json({ error: "E-mail não fornecido." });
+        }
+
+        // O alias 'as evento', 'as data' e 'as qtd' é para casar com o Front-end
+        const result = await db.query(
+            `SELECT 
+                id, 
+                evento_nome as evento, 
+                TO_CHAR(data_evento, 'DD/MM/YYYY') as data, 
+                status, 
+                quantidade as qtd
+             FROM public.compras 
+             WHERE usuario_email = $1 
+             ORDER BY id DESC`, 
+            [email]
+        );
+
+        res.json(result.rows);
+    } catch (err) {
+        console.error("❌ Erro ao listar ingressos:", err.message);
+        res.status(500).json({ error: "Erro ao buscar ingressos no servidor." });
+    }
+};
