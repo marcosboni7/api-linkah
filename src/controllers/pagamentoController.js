@@ -161,13 +161,15 @@ exports.listarMeusIngressos = async (req, res) => {
         }
 
         // O alias 'as evento', 'as data' e 'as qtd' é para casar com o Front-end
+        // Adicionado stripe_session_id para permitir o clique no card
         const result = await db.query(
             `SELECT 
                 id, 
                 evento_nome as evento, 
                 TO_CHAR(data_evento, 'DD/MM/YYYY') as data, 
                 status, 
-                quantidade as qtd
+                quantidade as qtd,
+                stripe_session_id
              FROM public.compras 
              WHERE usuario_email = $1 
              ORDER BY id DESC`, 
