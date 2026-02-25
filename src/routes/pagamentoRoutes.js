@@ -2,15 +2,17 @@ const express = require('express');
 const router = express.Router();
 const pagamentoController = require('../controllers/pagamentoController');
 
-// 1. Rota para criar a sessão do Stripe (Chamada quando clica em comprar)
+// 1. Rota para criar a sessão do Stripe
 router.post('/checkout', pagamentoController.criarSessaoCheckout);
 
-// 2. Rota para o Webhook (Chamada pelo Stripe após o pagamento aprovado)
-// IMPORTANTE: Essa rota deve ser configurada no painel do Stripe com o final /api/pagamentos/webhook
+// 2. Rota para o Webhook
 router.post('/webhook', express.raw({ type: 'application/json' }), pagamentoController.webhookStripe);
 
-// 3. NOVA ROTA: Buscar detalhes do ingresso (Chamada pela página de Sucesso no Next.js)
-// É esta rota que faz aparecer o nome do evento e a quantidade na tela do usuário
+// 3. Rota para detalhes da compra (Página de Sucesso)
 router.get('/detalhes/:sessionId', pagamentoController.buscarDetalhesCompra);
+
+// --- 4. NOVA ROTA: LISTAR INGRESSOS DO USUÁRIO ---
+// É esta linha que faz o modal da Navbar funcionar!
+router.get('/meus-ingressos', pagamentoController.listarMeusIngressos);
 
 module.exports = router;
