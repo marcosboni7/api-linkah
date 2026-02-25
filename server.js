@@ -114,16 +114,28 @@ const inicializarBanco = async () => {
     await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'produtor'`);
     await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Ativo'`);
 
-    // Mensagens e Chat
+    // --- CORREÇÕES NA TABELA mensagens_v2 (CHAT) ---
     try {
+        // Garante evento_id
         await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE`);
+        
+        // CORREÇÃO DO SEU ÚLTIMO ERRO: Garante usuario_nome
+        await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS usuario_nome VARCHAR(255)`);
+        
+        // Garante criado_em
         await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
-    } catch (e) { console.log('Nota: Migrações de colunas de mensagens já aplicadas.'); }
+        
+        console.log('✅ Colunas de mensagens_v2 sincronizadas (evento_id, usuario_nome, criado_em).');
+    } catch (e) { 
+        console.log('Nota: Algumas migrações de mensagens_v2 já foram feitas.'); 
+    }
 
-    // Presença (Garante a Unique Constraint para o ON CONFLICT não dar erro)
+    // Presença (Garante a Unique Constraint para o ON CONFLICT)
     try {
         await db.query(`ALTER TABLE public.presenca ADD CONSTRAINT unique_presenca UNIQUE (evento_id, usuario_nome)`);
-    } catch (e) { console.log('Nota: Constraint de presença já existe.'); }
+    } catch (e) { 
+        console.log('Nota: Constraint de presença já existe.'); 
+    }
 
     console.log('✅ Banco de dados sincronizado e pronto!');
   } catch (err) {
