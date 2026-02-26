@@ -1,5 +1,16 @@
 const db = require('../config/database');
 
+// Lista oficial de categorias (Sincronizada com o Front-end)
+const CATEGORIAS_VALIDAS = [
+  'Arte & Cultura',
+  'Entretenimento',
+  'Negócios',
+  'Educação & Desenvolvimento',
+  'Esportes & Bem-estar',
+  'Experiências & Lifestyle',
+  'Família & Comunidade'
+];
+
 // --- 1. LISTAR TODOS OS EVENTOS (VITRINE COM PREÇO) ---
 exports.listarTodosEventosParaVitrine = async (req, res) => {
   try {
@@ -74,9 +85,15 @@ exports.buscarEventoPorId = async (req, res) => {
   }
 };
 
-// --- 4. CRIAR EVENTO ---
+// --- 4. CRIAR EVENTO (ATUALIZADO COM NOVAS CATEGORIAS) ---
 exports.criarEventoPresencial = async (req, res) => {
   const { nome, produtor_email, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado } = req.body;
+  
+  // Validação de categoria
+  if (!CATEGORIAS_VALIDAS.includes(categoria)) {
+    return res.status(400).json({ error: `Categoria inválida. Use uma destas: ${CATEGORIAS_VALIDAS.join(', ')}` });
+  }
+
   try {
     const query = `
       INSERT INTO public.eventos 
@@ -91,7 +108,7 @@ exports.criarEventoPresencial = async (req, res) => {
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (VERSÃO REVISADA PARA EVITAR ERRO 500) ---
+// --- 5. ATUALIZAR EVENTO (ATUALIZADO COM NOVAS CATEGORIAS) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
   const { 
@@ -99,8 +116,12 @@ exports.atualizarEvento = async (req, res) => {
     local_nome, imagem_capa, cidade, estado, tipo, link_transmissao, status 
   } = req.body;
 
+  // Validação de categoria na atualização
+  if (categoria && !CATEGORIAS_VALIDAS.includes(categoria)) {
+    return res.status(400).json({ error: "A categoria fornecida não é permitida pelo novo sistema." });
+  }
+
   try {
-    // Limpeza de dados para evitar conflitos com tipos DATE e TIME do Postgres
     const dataLimpa = (data_inicio && data_inicio.trim() !== "") ? data_inicio.substring(0, 10) : null;
     const horaLimpa = (hora_inicio && hora_inicio.toString().trim() !== "") ? hora_inicio.toString().substring(0, 5) : null;
 
@@ -116,7 +137,7 @@ exports.atualizarEvento = async (req, res) => {
     
     const values = [
       nome || 'Sem nome', 
-      categoria || 'Geral', 
+      categoria || 'Entretenimento', // Default para uma das novas categorias
       descricao || '', 
       dataLimpa, 
       local_nome || '', 
@@ -136,7 +157,7 @@ exports.atualizarEvento = async (req, res) => {
       return res.status(404).json({ error: "Evento não encontrado." });
     }
 
-    console.log(`✅ Evento ${id} atualizado com sucesso.`);
+    console.log(`✅ Evento ${id} atualizado com as novas categorias.`);
     return res.status(200).json({ message: "Atualizado com sucesso", evento: result.rows[0] });
 
   } catch (err) {
