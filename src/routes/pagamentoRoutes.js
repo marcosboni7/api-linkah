@@ -2,17 +2,25 @@ const express = require('express');
 const router = express.Router();
 const pagamentoController = require('../controllers/pagamentoController');
 
-// 1. Rota para criar a sessão do Stripe
+// --- 1. CONFIGURAÇÃO DO PRODUTOR (STRIPE CONNECT) ---
+// Rota para o produtor vincular a conta bancária
+// Chamada no front: /api/pagamento/conectar-stripe
+router.post('/conectar-stripe', pagamentoController.vincularContaStripe);
+
+// --- 2. CHECKOUT E COMPRA ---
+// Inicia sessão de pagamento (Cartão + Pix)
 router.post('/checkout', pagamentoController.criarSessaoCheckout);
 
-// 2. Rota para o Webhook
-router.post('/webhook', express.raw({ type: 'application/json' }), pagamentoController.webhookStripe);
+// --- 3. WEBHOOK ---
+// O Stripe avisa o seu servidor aqui quando o pagamento é aprovado
+// OBS: No server.js já tratamos o express.raw, aqui basta passar o controller
+router.post('/webhook', pagamentoController.webhookStripe);
 
-// 3. Rota para detalhes da compra (Página de Sucesso)
+// --- 4. CONSULTAS ---
+// Detalhes para a página de sucesso
 router.get('/detalhes/:sessionId', pagamentoController.buscarDetalhesCompra);
 
-// --- 4. NOVA ROTA: LISTAR INGRESSOS DO USUÁRIO ---
-// É esta linha que faz o modal da Navbar funcionar!
+// Lista ingressos no modal da Navbar
 router.get('/meus-ingressos', pagamentoController.listarMeusIngressos);
 
 module.exports = router;

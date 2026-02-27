@@ -16,7 +16,7 @@ const db = require('./src/config/database');
 
 const app = express();
 
-// --- NOVO: Router de Usuários para o Staff ---
+// Router de Usuários para o Staff
 const routerUsuarios = express.Router();
 
 // --- 1. MIDDLEWARES DE SEGURANÇA E CORS ---
@@ -34,8 +34,9 @@ app.use(helmet({
 }));
 
 // --- 2. ROTA DE WEBHOOK (STRIPE) ---
+// Deve vir ANTES do express.json() para não corromper a assinatura
 app.post(
-  '/api/pagamentos/webhook',
+  '/api/pagamento/webhook',
   express.raw({ type: 'application/json' }),
   pagamentoController.webhookStripe
 );
@@ -50,7 +51,7 @@ const inicializarBanco = async () => {
     console.log('--- 🔄 Iniciando Conexão com o Banco ---');
     await db.query('SELECT NOW()');
     
-    // 1. Garante a existência das tabelas (Estrutura Completa)
+    // 1. Criar Tabelas Base
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.usuarios (
         id SERIAL PRIMARY KEY,
@@ -76,52 +77,20 @@ const inicializarBanco = async () => {
         status VARCHAR(50) DEFAULT 'Ativo',
         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-
-      CREATE TABLE IF NOT EXISTS public.mensagens_v2 (
-        id SERIAL PRIMARY KEY,
-        evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE,
-        usuario_nome VARCHAR(255) NOT NULL,
-        texto TEXT,
-        imagem TEXT,
-        tipo VARCHAR(50) DEFAULT 'chat',
-        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS public.presenca (
-        id SERIAL PRIMARY KEY,
-        evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE,
-        usuario_nome VARCHAR(255) NOT NULL,
-        ultima_vez TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        CONSTRAINT unique_presenca UNIQUE (evento_id, usuario_nome)
-      );
     `);
 
-    // --- 2. MIGRAÇÕES FORÇADAS (Para bancos que já existem mas estão incompletos) ---
+    // --- 2. MIGRAÇÕES STRIPE CONNECT (ESSENCIAL) ---
+    console.log('--- 💳 Sincronizando Colunas Stripe ---');
+    await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS stripe_account_id VARCHAR(255)`);
+    await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS stripe_account_id VARCHAR(255)`);
+    await db.query(`ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS stripe_account_id VARCHAR(255)`);
+    await db.query(`ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS preco DECIMAL(10,2) DEFAULT 0`);
 
-    // Usuários e Produtores
+    // --- 3. OUTRAS MIGRAÇÕES ---
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'user'`);
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Ativo'`);
     await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'produtor'`);
     await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Ativo'`);
-
-    // --- CORREÇÃO FINAL DA TABELA mensagens_v2 (BLINDAGEM TOTAL) ---
-    try {
-        await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS evento_id INTEGER REFERENCES public.eventos(id) ON DELETE CASCADE`);
-        await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS usuario_nome VARCHAR(255)`);
-        await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS texto TEXT`); // <--- RESOLVE O ERRO ATUAL
-        await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS imagem TEXT`);
-        await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS tipo VARCHAR(50) DEFAULT 'chat'`);
-        await db.query(`ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
-        
-        console.log('✅ Estrutura de mensagens_v2 totalmente blindada!');
-    } catch (e) {
-        console.log('Nota: Algumas colunas já existiam.');
-    }
-
-    // Presença
-    try {
-        await db.query(`ALTER TABLE public.presenca ADD CONSTRAINT unique_presenca UNIQUE (evento_id, usuario_nome)`);
-    } catch (e) { }
 
     console.log('✅ Banco de dados sincronizado e pronto!');
   } catch (err) {
@@ -133,33 +102,13 @@ const inicializarBanco = async () => {
 routerUsuarios.get('/', async (req, res) => {
   try {
     const query = `
-      SELECT nome, email, role, status, data_criacao as created_at FROM public.produtores
+      SELECT nome, email, role, status, data_criacao as created_at, stripe_account_id FROM public.produtores
       UNION ALL
-      SELECT nome, email, role, status, created_at FROM public.usuarios
+      SELECT nome, email, role, status, created_at, stripe_account_id FROM public.usuarios
       ORDER BY created_at DESC
     `;
     const result = await db.query(query);
     res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-routerUsuarios.put('/:id_ou_email', async (req, res) => {
-  const { id_ou_email } = req.params;
-  const { nome, role, status, senha } = req.body;
-  try {
-    const updateUsers = senha 
-      ? 'UPDATE public.usuarios SET nome = $1, role = $2, status = $3, senha = $4 WHERE id::text = $5 OR email = $5'
-      : 'UPDATE public.usuarios SET nome = $1, role = $2, status = $3 WHERE id::text = $4 OR email = $4';
-    const paramsUsers = senha ? [nome, role, status, senha, id_ou_email] : [nome, role, status, id_ou_email];
-    const resUsers = await db.query(updateUsers, paramsUsers);
-    
-    if (resUsers.rowCount === 0) {
-      const updateProd = 'UPDATE public.produtores SET nome = $1, role = $2, status = $3 WHERE email = $4';
-      await db.query(updateProd, [nome, role, status, id_ou_email]);
-    }
-    res.json({ message: 'Membro atualizado com sucesso!' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -174,8 +123,9 @@ app.use((req, res, next) => {
 // --- 7. REGISTRO DAS ROTAS DA API ---
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
+  // AJUSTE: Mudei para SINGULAR para bater com o seu Front-end
+app.use('/api/pagamento', pagamentoRoutes); 
 app.use('/api/compras', compraRoutes);
-app.use('/api/pagamentos', pagamentoRoutes);
 app.use('/api/comunidades', comunidadeRoutes); 
 app.use('/api/usuarios', routerUsuarios);
 
