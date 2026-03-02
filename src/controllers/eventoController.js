@@ -85,9 +85,12 @@ exports.buscarEventoPorId = async (req, res) => {
   }
 };
 
-// --- 4. CRIAR EVENTO ---
+// --- 4. CRIAR EVENTO (CORRIGIDO PARA MOEDA VARIÁVEL) ---
 exports.criarEventoPresencial = async (req, res) => {
-  const { nome, produtor_email, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado } = req.body;
+  const { 
+    nome, produtor_email, categoria, descricao, data_inicio, 
+    hora_inicio, local_nome, imagem_capa, cidade, estado, moeda 
+  } = req.body;
   
   if (!CATEGORIAS_VALIDAS.includes(categoria)) {
     return res.status(400).json({ error: `Categoria inválida. Use uma destas: ${CATEGORIAS_VALIDAS.join(', ')}` });
@@ -97,22 +100,34 @@ exports.criarEventoPresencial = async (req, res) => {
     const query = `
       INSERT INTO public.eventos 
       (nome, produtor_email, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado, tipo, status, moeda)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'presencial', 'Ativo', 'BRL')
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'presencial', 'Ativo', $11)
       RETURNING id
     `;
-    const result = await db.query(query, [nome, produtor_email, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado]);
+    const result = await db.query(query, [
+      nome, 
+      produtor_email, 
+      categoria, 
+      descricao, 
+      data_inicio, 
+      hora_inicio, 
+      local_nome, 
+      imagem_capa, 
+      cidade, 
+      estado,
+      moeda || 'BRL' // Agora aceita Euro ou Real vindo do Front
+    ]);
     res.status(201).json({ message: "Evento criado!", id: result.rows[0].id });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-// --- 5. ATUALIZAR EVENTO ---
+// --- 5. ATUALIZAR EVENTO (CORRIGIDO PARA INCLUIR MOEDA) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
   const { 
     nome, categoria, descricao, data_inicio, hora_inicio, 
-    local_nome, imagem_capa, cidade, estado, tipo, link_transmissao, status 
+    local_nome, imagem_capa, cidade, estado, tipo, link_transmissao, status, moeda 
   } = req.body;
 
   if (categoria && !CATEGORIAS_VALIDAS.includes(categoria)) {
@@ -128,8 +143,9 @@ exports.atualizarEvento = async (req, res) => {
       SET 
         nome = $1, categoria = $2, descricao = $3, data_inicio = $4, 
         local_nome = $5, imagem_capa = $6, cidade = $7, estado = $8, 
-        hora_inicio = $9, tipo = $10, link_transmissao = $11, status = $12
-      WHERE id = $13
+        hora_inicio = $9, tipo = $10, link_transmissao = $11, status = $12,
+        moeda = $13
+      WHERE id = $14
       RETURNING *
     `;
     
@@ -145,7 +161,8 @@ exports.atualizarEvento = async (req, res) => {
       horaLimpa, 
       tipo || 'presencial', 
       link_transmissao || null, 
-      status || 'Ativo', 
+      status || 'Ativo',
+      moeda || 'BRL', // Mantém a moeda na atualização
       id
     ];
 
@@ -173,23 +190,23 @@ exports.excluirEvento = async (req, res) => {
 // --- 7. SALVAR INGRESSOS (PREÇOS E MOEDA) ---
 exports.salvarIngressos = async (req, res) => {
   const { id } = req.params;
-  const { ingressos, moeda_evento } = req.body; // moeda_evento vem do Front agora
+  const { ingressos, moeda_evento } = req.body; 
 
   try {
     // 1. Limpa ingressos antigos
     await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
 
-    // 2. Salva os novos ingressos com a moeda individual
+    // 2. Salva os novos ingressos
     if (ingressos && Array.isArray(ingressos)) {
       for (const ing of ingressos) {
         await db.query(
           'INSERT INTO public.ingressos (evento_id, nome, preco, quantidade, moeda) VALUES ($1, $2, $3, $4, $5)',
-          [id, ing.nome, ing.preco || 0, ing.quantidade || 0, ing.moeda || 'BRL']
+          [id, ing.nome, ing.preco || 0, ing.quantidade || 0, moeda_evento || 'BRL']
         );
       }
     }
 
-    // 3. ATUALIZA A MOEDA PRINCIPAL DO EVENTO (Para a Vitrine funcionar)
+    // 3. Atualiza a moeda principal do evento
     if (moeda_evento) {
       await db.query('UPDATE public.eventos SET moeda = $1 WHERE id = $2', [moeda_evento, id]);
     }
