@@ -11,18 +11,18 @@ const CATEGORIAS_VALIDAS = [
   'Família & Comunidade'
 ];
 
-// --- 1. LISTAR TODOS OS EVENTOS (VITRINE COM PREÇO) ---
+// --- 1. LISTAR TODOS OS EVENTOS (VITRINE COM PREÇO E MOEDA) ---
 exports.listarTodosEventosParaVitrine = async (req, res) => {
   try {
     const query = `
       SELECT 
         e.id, e.nome, e.imagem_capa, e.data_inicio, e.hora_inicio, 
-        e.local_nome, e.cidade, e.estado, e.categoria, e.tipo, e.status,
+        e.local_nome, e.cidade, e.estado, e.categoria, e.tipo, e.status, e.moeda,
         MIN(i.preco) as preco_minimo
       FROM public.eventos e
       LEFT JOIN public.ingressos i ON e.id = i.evento_id
       WHERE e.status = 'Ativo'
-      GROUP BY e.id
+      GROUP BY e.id, e.moeda
       ORDER BY e.id DESC
     `;
     const result = await db.query(query);
@@ -85,11 +85,10 @@ exports.buscarEventoPorId = async (req, res) => {
   }
 };
 
-// --- 4. CRIAR EVENTO (ATUALIZADO COM NOVAS CATEGORIAS) ---
+// --- 4. CRIAR EVENTO ---
 exports.criarEventoPresencial = async (req, res) => {
   const { nome, produtor_email, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado } = req.body;
   
-  // Validação de categoria
   if (!CATEGORIAS_VALIDAS.includes(categoria)) {
     return res.status(400).json({ error: `Categoria inválida. Use uma destas: ${CATEGORIAS_VALIDAS.join(', ')}` });
   }
@@ -97,8 +96,8 @@ exports.criarEventoPresencial = async (req, res) => {
   try {
     const query = `
       INSERT INTO public.eventos 
-      (nome, produtor_email, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado, tipo, status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'presencial', 'Ativo')
+      (nome, produtor_email, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado, tipo, status, moeda)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'presencial', 'Ativo', 'BRL')
       RETURNING id
     `;
     const result = await db.query(query, [nome, produtor_email, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado]);
@@ -108,7 +107,7 @@ exports.criarEventoPresencial = async (req, res) => {
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (ATUALIZADO COM NOVAS CATEGORIAS) ---
+// --- 5. ATUALIZAR EVENTO ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
   const { 
@@ -116,7 +115,6 @@ exports.atualizarEvento = async (req, res) => {
     local_nome, imagem_capa, cidade, estado, tipo, link_transmissao, status 
   } = req.body;
 
-  // Validação de categoria na atualização
   if (categoria && !CATEGORIAS_VALIDAS.includes(categoria)) {
     return res.status(400).json({ error: "A categoria fornecida não é permitida pelo novo sistema." });
   }
@@ -137,7 +135,7 @@ exports.atualizarEvento = async (req, res) => {
     
     const values = [
       nome || 'Sem nome', 
-      categoria || 'Entretenimento', // Default para uma das novas categorias
+      categoria || 'Entretenimento', 
       descricao || '', 
       dataLimpa, 
       local_nome || '', 
@@ -152,16 +150,10 @@ exports.atualizarEvento = async (req, res) => {
     ];
 
     const result = await db.query(query, values);
+    if (result.rowCount === 0) return res.status(404).json({ error: "Evento não encontrado." });
 
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: "Evento não encontrado." });
-    }
-
-    console.log(`✅ Evento ${id} atualizado com as novas categorias.`);
     return res.status(200).json({ message: "Atualizado com sucesso", evento: result.rows[0] });
-
   } catch (err) {
-    console.error("❌ Erro no UPDATE:", err.message);
     return res.status(500).json({ error: "Erro interno no servidor", detalhes: err.message });
   }
 };
@@ -178,23 +170,33 @@ exports.excluirEvento = async (req, res) => {
   }
 };
 
-// --- 7. SALVAR INGRESSOS (PREÇOS) ---
+// --- 7. SALVAR INGRESSOS (PREÇOS E MOEDA) ---
 exports.salvarIngressos = async (req, res) => {
   const { id } = req.params;
-  const { ingressos } = req.body;
+  const { ingressos, moeda_evento } = req.body; // moeda_evento vem do Front agora
 
   try {
+    // 1. Limpa ingressos antigos
     await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
+
+    // 2. Salva os novos ingressos com a moeda individual
     if (ingressos && Array.isArray(ingressos)) {
       for (const ing of ingressos) {
         await db.query(
-          'INSERT INTO public.ingressos (evento_id, nome, preco, quantidade) VALUES ($1, $2, $3, $4)',
-          [id, ing.nome, ing.preco || 0, ing.quantidade || 0]
+          'INSERT INTO public.ingressos (evento_id, nome, preco, quantidade, moeda) VALUES ($1, $2, $3, $4, $5)',
+          [id, ing.nome, ing.preco || 0, ing.quantidade || 0, ing.moeda || 'BRL']
         );
       }
     }
-    res.status(200).json({ message: "Ingressos salvos!" });
+
+    // 3. ATUALIZA A MOEDA PRINCIPAL DO EVENTO (Para a Vitrine funcionar)
+    if (moeda_evento) {
+      await db.query('UPDATE public.eventos SET moeda = $1 WHERE id = $2', [moeda_evento, id]);
+    }
+
+    res.status(200).json({ message: "Ingressos e moeda do evento salvos com sucesso!" });
   } catch (err) {
+    console.error("❌ Erro ao salvar ingressos/moeda:", err.message);
     res.status(500).json({ error: err.message });
   }
 };
