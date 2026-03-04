@@ -45,7 +45,6 @@ exports.listarEventosPorProdutor = async (req, res) => {
 
   try {
     const emailLimpo = email.replace(/['"]+/g, '').trim().toLowerCase();
-    // Adicionado CASE para limpar dados sujos do banco na listagem
     const query = `
       SELECT *, 
       CASE WHEN imagem_capa = 'undefined' OR imagem_capa = 'null' THEN NULL ELSE imagem_capa END as imagem_capa 
@@ -135,7 +134,7 @@ exports.criarEventoPresencial = async (req, res) => {
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (PROTEÇÃO RIGOROSA) ---
+// --- 5. ATUALIZAR EVENTO (Lógica de Nome e Imagem Consertada) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
   try {
@@ -143,28 +142,29 @@ exports.atualizarEvento = async (req, res) => {
     if (check.rowCount === 0) return res.status(404).json({ error: "Evento não encontrado" });
     const atual = check.rows[0];
 
-    // Lógica Blindada para Imagem
+    // --- Lógica Blindada para Imagem ---
     let imagemFinal = atual.imagem_capa;
 
     if (req.file) {
+      // Prioridade 1: Novo arquivo físico enviado
       imagemFinal = req.file.location || req.file.filename || req.file.path;
       if (!String(imagemFinal).startsWith('http')) {
         imagemFinal = `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${imagemFinal}`;
       }
     } else {
-        // Se não veio arquivo, verifica se o que veio no body é válido ou lixo
+        // Prioridade 2: Verifica se veio uma URL no body que não seja lixo
         const imgBody = req.body.imagem_capa;
         const isLixo = !imgBody || 
                        imgBody === "undefined" || 
                        imgBody === "null" || 
                        imgBody === "[object Object]";
         
-        // Se NÃO for lixo e for diferente de undefined, atualiza. Caso contrário, mantém o que já tinha no banco.
         if (!isLixo) {
             imagemFinal = imgBody;
         }
     }
 
+    // --- Limpeza de Campos ---
     const nome = limparCampo(req.body.nome, atual.nome);
     const categoria = limparCampo(req.body.categoria, atual.categoria);
     const descricao = limparCampo(req.body.descricao, atual.descricao);
