@@ -14,7 +14,6 @@ const CATEGORIAS_VALIDAS = [
 // Função auxiliar para evitar que strings de erro do Front-end entrem no Banco
 const limparCampo = (valor, fallback, label) => {
   if (valor === undefined || valor === null || valor === 'undefined' || valor === 'null' || valor === '') {
-    // console.log(`[DEBUG] Campo ${label} inválido, usando fallback.`);
     return fallback;
   }
   return valor;
@@ -45,8 +44,6 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
 // --- 2. LISTAR EVENTOS POR PRODUTOR (DASHBOARD) ---
 exports.listarEventosPorProdutor = async (req, res) => {
   const { email } = req.query; 
-  console.log("[DEBUG] Listando eventos para o email:", email);
-
   if (!email) return res.status(400).json({ error: "Email não fornecido" });
 
   try {
@@ -91,9 +88,9 @@ exports.buscarEventoPorId = async (req, res) => {
 
 // --- 4. CRIAR EVENTO ---
 exports.criarEventoPresencial = async (req, res) => {
-  console.log("[DEBUG] Criando evento. Body:", req.body);
-  console.log("[DEBUG] Arquivo recebido:", req.file ? req.file.originalname : "Nenhum");
-
+  console.log("\n--- [DEBUG] CRIANDO EVENTO PRESENCIAL ---");
+  
+  // Imagem via Multer ou Body
   const imagemFinal = req.file ? (req.file.location || req.file.path) : req.body.imagem_capa;
   
   const { 
@@ -108,8 +105,9 @@ exports.criarEventoPresencial = async (req, res) => {
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'presencial', 'Ativo', $11)
       RETURNING id
     `;
+    
     const result = await db.query(query, [
-      limparCampo(nome, 'Novo Evento', 'nome'), 
+      limparCampo(nome, 'Novo Evento Sem Nome', 'nome'), 
       produtor_email, 
       limparCampo(categoria, 'Entretenimento', 'categoria'), 
       limparCampo(descricao, '', 'descricao'), 
@@ -121,48 +119,41 @@ exports.criarEventoPresencial = async (req, res) => {
       limparCampo(estado, '', 'estado'), 
       moeda || 'BRL'
     ]);
+
+    console.log("[DEBUG] Evento criado com ID:", result.rows[0].id);
     res.status(201).json({ message: "Evento criado!", id: result.rows[0].id });
   } catch (err) {
+    console.error("❌ Erro ao criar evento:", err.message);
     res.status(500).json({ error: err.message });
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (COM DEBUG E ANTI-BUG) ---
+// --- 5. ATUALIZAR EVENTO (BLINDADO) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
 
-  // LOGS DE DEBUG NO TERMINAL AWS
   console.log(`\n--- [DEBUG START] ATUALIZANDO EVENTO ID: ${id} ---`);
-  console.log("Headers:", req.headers['content-type']);
   console.log("Body Recebido:", JSON.stringify(req.body));
-  console.log("Arquivo (req.file):", req.file ? {
-    nome: req.file.originalname,
-    path: req.file.path,
-    location: req.file.location
-  } : "Nenhum arquivo enviado");
 
   try {
-    // Busca dados atuais para persistência
     const check = await db.query('SELECT * FROM public.eventos WHERE id = $1', [id]);
-    if (check.rowCount === 0) {
-      console.log("[DEBUG] Evento não encontrado no Banco.");
-      return res.status(404).json({ error: "Evento não encontrado" });
-    }
+    if (check.rowCount === 0) return res.status(404).json({ error: "Evento não encontrado" });
+    
     const atual = check.rows[0];
 
     // Lógica da Imagem
     let imagemFinal = atual.imagem_capa;
     if (req.file) {
       imagemFinal = req.file.location || req.file.path || req.file.filename;
-      if (!req.file.location && !imagemFinal.startsWith('http')) {
+      // Ajuste para caminhos locais se não for S3
+      if (!req.file.location && imagemFinal && !imagemFinal.startsWith('http')) {
         imagemFinal = `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${imagemFinal}`;
       }
-      console.log("[DEBUG] Nova imagem processada:", imagemFinal);
     } else {
       imagemFinal = limparCampo(req.body.imagem_capa, atual.imagem_capa, 'imagem_capa');
     }
 
-    // Tratamento Anti-Bug
+    // Tratamento dos campos para evitar "undefined" ou "null" de strings
     const nome = limparCampo(req.body.nome, atual.nome, 'nome');
     const categoria = limparCampo(req.body.categoria, atual.categoria, 'categoria');
     const descricao = limparCampo(req.body.descricao, atual.descricao, 'descricao');
@@ -172,9 +163,10 @@ exports.atualizarEvento = async (req, res) => {
     const moeda = limparCampo(req.body.moeda, atual.moeda, 'moeda');
     const status = limparCampo(req.body.status, atual.status, 'status');
 
+    // Tratamento especial para data
     const data_inicio = (req.body.data_inicio && req.body.data_inicio !== "null" && req.body.data_inicio !== "undefined") 
       ? String(req.body.data_inicio).substring(0, 10) 
-      : atual.data_inicio;
+      : (atual.data_inicio ? new Date(atual.data_inicio).toISOString().substring(0, 10) : null);
 
     const query = `
       UPDATE public.eventos 
@@ -193,10 +185,8 @@ exports.atualizarEvento = async (req, res) => {
     ];
 
     const result = await db.query(query, values);
+    console.log("[DEBUG] Nome salvo no Banco:", result.rows[0].nome);
     
-    console.log("[DEBUG] Update concluído. Nome salvo:", result.rows[0].nome);
-    console.log("--- [DEBUG END] ---\n");
-
     return res.status(200).json({ message: "Atualizado!", evento: result.rows[0] });
 
   } catch (err) {
