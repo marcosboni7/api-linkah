@@ -18,7 +18,9 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
   try {
     const query = `
       SELECT 
-        e.id, e.nome, e.imagem_capa, e.data_inicio, e.hora_inicio, 
+        e.id, e.nome, 
+        CASE WHEN e.imagem_capa = 'undefined' OR e.imagem_capa = 'null' THEN NULL ELSE e.imagem_capa END as imagem_capa, 
+        e.data_inicio, e.hora_inicio, 
         e.local_nome, e.cidade, e.estado, e.categoria, e.tipo, e.status, e.moeda,
         COALESCE(MIN(i.preco), 0) as preco_minimo
       FROM public.eventos e
@@ -43,7 +45,14 @@ exports.listarEventosPorProdutor = async (req, res) => {
 
   try {
     const emailLimpo = email.replace(/['"]+/g, '').trim().toLowerCase();
-    const query = `SELECT * FROM public.eventos WHERE produtor_email = $1 ORDER BY id DESC`;
+    // Adicionado CASE para limpar dados sujos do banco na listagem
+    const query = `
+      SELECT *, 
+      CASE WHEN imagem_capa = 'undefined' OR imagem_capa = 'null' THEN NULL ELSE imagem_capa END as imagem_capa 
+      FROM public.eventos 
+      WHERE produtor_email = $1 
+      ORDER BY id DESC
+    `;
     const result = await db.query(query, [emailLimpo]);
     return res.status(200).json(result.rows);
   } catch (err) {
@@ -56,7 +65,9 @@ exports.buscarEventoPorId = async (req, res) => {
   const { id } = req.params;
   try {
     const query = `
-      SELECT e.*, p.nome as produtor_nome, p.foto_perfil as produtor_foto
+      SELECT e.*, 
+      CASE WHEN e.imagem_capa = 'undefined' OR e.imagem_capa = 'null' THEN NULL ELSE e.imagem_capa END as imagem_capa,
+      p.nome as produtor_nome, p.foto_perfil as produtor_foto
       FROM public.eventos e
       LEFT JOIN public.produtores p ON e.produtor_email = p.email
       WHERE e.id = $1
@@ -80,7 +91,6 @@ exports.buscarEventoPorId = async (req, res) => {
 
 // --- 4. CRIAR EVENTO ---
 exports.criarEventoPresencial = async (req, res) => {
-  // Lógica de Imagem Anti-Undefined
   let imagemFinal = null;
 
   if (req.file) {
@@ -125,7 +135,7 @@ exports.criarEventoPresencial = async (req, res) => {
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (COM TRAVA ANTI-UNDEFINED) ---
+// --- 5. ATUALIZAR EVENTO (PROTEÇÃO RIGOROSA) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
   try {
@@ -141,13 +151,18 @@ exports.atualizarEvento = async (req, res) => {
       if (!String(imagemFinal).startsWith('http')) {
         imagemFinal = `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${imagemFinal}`;
       }
-    } else if (
-      req.body.imagem_capa && 
-      req.body.imagem_capa !== "undefined" && 
-      req.body.imagem_capa !== "null" &&
-      req.body.imagem_capa !== "[object Object]"
-    ) {
-      imagemFinal = req.body.imagem_capa;
+    } else {
+        // Se não veio arquivo, verifica se o que veio no body é válido ou lixo
+        const imgBody = req.body.imagem_capa;
+        const isLixo = !imgBody || 
+                       imgBody === "undefined" || 
+                       imgBody === "null" || 
+                       imgBody === "[object Object]";
+        
+        // Se NÃO for lixo e for diferente de undefined, atualiza. Caso contrário, mantém o que já tinha no banco.
+        if (!isLixo) {
+            imagemFinal = imgBody;
+        }
     }
 
     const nome = limparCampo(req.body.nome, atual.nome);
