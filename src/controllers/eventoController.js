@@ -112,13 +112,17 @@ exports.criarEventoPresencial = async (req, res) => {
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (CORRIGIDO PARA NÃO SUMIR NOME E FOTO) ---
+// --- 5. ATUALIZAR EVENTO (CORRIGIDO E REFORÇADO) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
 
+  // DEBUG: Verifique se isso aparece preenchido no terminal da AWS
+  console.log("Recebendo Body:", req.body);
+  console.log("Recebendo File:", req.file);
+
   // LÓGICA DA IMAGEM: 
-  // 1. Prioridade para novo arquivo vindo do Multer (req.file)
-  // 2. Se não houver arquivo, usa o link de imagem enviado no corpo (imagem_capa)
+  // 1. Prioridade para novo arquivo (S3 ou Local)
+  // 2. Fallback para o link que já está no banco ou enviado como texto
   const imagemFinal = req.file ? (req.file.location || req.file.path) : req.body.imagem_capa;
 
   const { 
@@ -146,12 +150,12 @@ exports.atualizarEvento = async (req, res) => {
     `;
     
     const values = [
-      nome || 'Sem nome', 
+      nome || 'Sem nome', // Se chegar vazio aqui, vira 'Sem nome'
       categoria || 'Entretenimento', 
       descricao || '', 
       dataLimpa, 
       local_nome || '', 
-      imagemFinal, 
+      imagemFinal, // Aqui salva o link da imagem
       cidade || '', 
       estado || '', 
       horaLimpa, 
