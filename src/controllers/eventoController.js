@@ -72,7 +72,6 @@ exports.buscarEventoPorId = async (req, res) => {
 
     const evento = result.rows[0];
 
-    // Formatação de data/hora para o Front
     if (evento.data_inicio) evento.data_inicio = new Date(evento.data_inicio).toISOString().split('T')[0];
     if (evento.hora_inicio) evento.hora_inicio = evento.hora_inicio.toString().substring(0, 5);
 
@@ -85,7 +84,7 @@ exports.buscarEventoPorId = async (req, res) => {
   }
 };
 
-// --- 4. CRIAR EVENTO (CORRIGIDO PARA MOEDA VARIÁVEL) ---
+// --- 4. CRIAR EVENTO ---
 exports.criarEventoPresencial = async (req, res) => {
   const { 
     nome, produtor_email, categoria, descricao, data_inicio, 
@@ -93,7 +92,7 @@ exports.criarEventoPresencial = async (req, res) => {
   } = req.body;
   
   if (!CATEGORIAS_VALIDAS.includes(categoria)) {
-    return res.status(400).json({ error: `Categoria inválida. Use uma destas: ${CATEGORIAS_VALIDAS.join(', ')}` });
+    return res.status(400).json({ error: `Categoria inválida.` });
   }
 
   try {
@@ -104,17 +103,8 @@ exports.criarEventoPresencial = async (req, res) => {
       RETURNING id
     `;
     const result = await db.query(query, [
-      nome, 
-      produtor_email, 
-      categoria, 
-      descricao, 
-      data_inicio, 
-      hora_inicio, 
-      local_nome, 
-      imagem_capa, 
-      cidade, 
-      estado,
-      moeda || 'BRL' // Agora aceita Euro ou Real vindo do Front
+      nome, produtor_email, categoria, descricao, data_inicio, 
+      hora_inicio, local_nome, imagem_capa, cidade, estado, moeda || 'BRL'
     ]);
     res.status(201).json({ message: "Evento criado!", id: result.rows[0].id });
   } catch (err) {
@@ -122,21 +112,27 @@ exports.criarEventoPresencial = async (req, res) => {
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (CORRIGIDO PARA INCLUIR MOEDA) ---
+// --- 5. ATUALIZAR EVENTO (CORRIGIDO PARA NÃO SUMIR NOME E FOTO) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
+
+  // LÓGICA DA IMAGEM: 
+  // 1. Prioridade para novo arquivo vindo do Multer (req.file)
+  // 2. Se não houver arquivo, usa o link de imagem enviado no corpo (imagem_capa)
+  const imagemFinal = req.file ? (req.file.location || req.file.path) : req.body.imagem_capa;
+
   const { 
     nome, categoria, descricao, data_inicio, hora_inicio, 
-    local_nome, imagem_capa, cidade, estado, tipo, link_transmissao, status, moeda 
+    local_nome, cidade, estado, tipo, link_transmissao, status, moeda 
   } = req.body;
 
   if (categoria && !CATEGORIAS_VALIDAS.includes(categoria)) {
-    return res.status(400).json({ error: "A categoria fornecida não é permitida pelo novo sistema." });
+    return res.status(400).json({ error: "Categoria inválida." });
   }
 
   try {
-    const dataLimpa = (data_inicio && data_inicio.trim() !== "") ? data_inicio.substring(0, 10) : null;
-    const horaLimpa = (hora_inicio && hora_inicio.toString().trim() !== "") ? hora_inicio.toString().substring(0, 5) : null;
+    const dataLimpa = (data_inicio && String(data_inicio).trim() !== "") ? String(data_inicio).substring(0, 10) : null;
+    const horaLimpa = (hora_inicio && String(hora_inicio).trim() !== "") ? String(hora_inicio).toString().substring(0, 5) : null;
 
     const query = `
       UPDATE public.eventos 
@@ -155,14 +151,14 @@ exports.atualizarEvento = async (req, res) => {
       descricao || '', 
       dataLimpa, 
       local_nome || '', 
-      imagem_capa || null, 
+      imagemFinal, 
       cidade || '', 
       estado || '', 
       horaLimpa, 
       tipo || 'presencial', 
       link_transmissao || null, 
       status || 'Ativo',
-      moeda || 'BRL', // Mantém a moeda na atualização
+      moeda || 'BRL',
       id
     ];
 
@@ -171,7 +167,8 @@ exports.atualizarEvento = async (req, res) => {
 
     return res.status(200).json({ message: "Atualizado com sucesso", evento: result.rows[0] });
   } catch (err) {
-    return res.status(500).json({ error: "Erro interno no servidor", detalhes: err.message });
+    console.error("❌ Erro ao atualizar:", err.message);
+    return res.status(500).json({ error: "Erro interno no servidor" });
   }
 };
 
@@ -187,16 +184,13 @@ exports.excluirEvento = async (req, res) => {
   }
 };
 
-// --- 7. SALVAR INGRESSOS (PREÇOS E MOEDA) ---
+// --- 7. SALVAR INGRESSOS ---
 exports.salvarIngressos = async (req, res) => {
   const { id } = req.params;
   const { ingressos, moeda_evento } = req.body; 
 
   try {
-    // 1. Limpa ingressos antigos
     await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
-
-    // 2. Salva os novos ingressos
     if (ingressos && Array.isArray(ingressos)) {
       for (const ing of ingressos) {
         await db.query(
@@ -205,15 +199,11 @@ exports.salvarIngressos = async (req, res) => {
         );
       }
     }
-
-    // 3. Atualiza a moeda principal do evento
     if (moeda_evento) {
       await db.query('UPDATE public.eventos SET moeda = $1 WHERE id = $2', [moeda_evento, id]);
     }
-
-    res.status(200).json({ message: "Ingressos e moeda do evento salvos com sucesso!" });
+    res.status(200).json({ message: "Ingressos salvos!" });
   } catch (err) {
-    console.error("❌ Erro ao salvar ingressos/moeda:", err.message);
     res.status(500).json({ error: err.message });
   }
 };
