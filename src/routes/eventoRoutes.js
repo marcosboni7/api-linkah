@@ -9,7 +9,7 @@ router.get('/', eventoController.listarTodosEventosParaVitrine);
 router.get('/vitrine', eventoController.listarTodosEventosParaVitrine);
 
 // --- 2. ROTAS DE CRIAÇÃO ---
-// Mudado de 'imagem' para 'imagem_capa' para bater com o Front-end
+// GARANTIR que OnlineController também use 'imagem_capa' no req.file
 router.post('/novo-online', upload.single('imagem_capa'), OnlineController.criarEventoOnline);
 router.post('/novo-presencial', upload.single('imagem_capa'), eventoController.criarEventoPresencial);
 
@@ -18,7 +18,7 @@ router.get('/listar', eventoController.listarEventosPorProdutor);
 router.get('/:id', eventoController.buscarEventoPorId);
 
 // --- 4. ROTA DE ATUALIZAÇÃO ---
-// Mudado de 'imagem' para 'imagem_capa'
+// Aqui é onde o multer extrai o arquivo. Sem isso, req.file vira undefined.
 router.put('/:id', upload.single('imagem_capa'), eventoController.atualizarEvento);
 
 // --- 5. GESTÃO DE EVENTO ---
