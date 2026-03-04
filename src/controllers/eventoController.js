@@ -1,25 +1,13 @@
 const db = require('../config/database');
 
-// Lista oficial de categorias
 const CATEGORIAS_VALIDAS = [
-  'Arte & Cultura',
-  'Entretenimento',
-  'Negócios',
-  'Educação & Desenvolvimento',
-  'Esportes & Bem-estar',
-  'Experiências & Lifestyle',
-  'Família & Comunidade'
+  'Arte & Cultura', 'Entretenimento', 'Negócios', 
+  'Educação & Desenvolvimento', 'Esportes & Bem-estar', 
+  'Experiências & Lifestyle', 'Família & Comunidade'
 ];
 
-// Função auxiliar aprimorada para evitar que lixo do Front-end entre no Banco
-const limparCampo = (valor, fallback, label) => {
-  if (
-    valor === undefined || 
-    valor === null || 
-    valor === 'undefined' || 
-    valor === 'null' || 
-    String(valor).trim() === ''
-  ) {
+const limparCampo = (valor, fallback) => {
+  if (valor === undefined || valor === null || valor === 'undefined' || valor === 'null' || String(valor).trim() === '') {
     return fallback;
   }
   return valor;
@@ -32,11 +20,12 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
       SELECT 
         e.id, e.nome, e.imagem_capa, e.data_inicio, e.hora_inicio, 
         e.local_nome, e.cidade, e.estado, e.categoria, e.tipo, e.status, e.moeda,
-        MIN(i.preco) as preco_minimo
+        COALESCE(MIN(i.preco), 0) as preco_minimo
       FROM public.eventos e
       LEFT JOIN public.ingressos i ON e.id = i.evento_id
-      WHERE e.status = 'Ativo'
-      GROUP BY e.id, e.moeda
+      WHERE e.status ILIKE 'Ativo'
+      GROUP BY e.id, e.nome, e.imagem_capa, e.data_inicio, e.hora_inicio, 
+               e.local_nome, e.cidade, e.estado, e.categoria, e.tipo, e.status, e.moeda
       ORDER BY e.id DESC
     `;
     const result = await db.query(query);
@@ -54,15 +43,11 @@ exports.listarEventosPorProdutor = async (req, res) => {
 
   try {
     const emailLimpo = email.replace(/['"]+/g, '').trim().toLowerCase();
-    const query = `
-      SELECT * FROM public.eventos 
-      WHERE produtor_email = $1 
-      ORDER BY id DESC
-    `;
+    // Selecionamos explicitamente as colunas para garantir que imagem_capa venha
+    const query = `SELECT * FROM public.eventos WHERE produtor_email = $1 ORDER BY id DESC`;
     const result = await db.query(query, [emailLimpo]);
     return res.status(200).json(result.rows);
   } catch (err) {
-    console.error("❌ Erro ao listar eventos do produtor:", err.message);
     return res.status(500).json({ error: err.message });
   }
 };
@@ -96,10 +81,14 @@ exports.buscarEventoPorId = async (req, res) => {
 
 // --- 4. CRIAR EVENTO ---
 exports.criarEventoPresencial = async (req, res) => {
-  console.log("\n--- [DEBUG] CRIANDO EVENTO ---");
-  
-  const imagemFinal = req.file ? (req.file.location || req.file.path) : req.body.imagem_capa;
-  
+  // Pega a imagem do Multer (S3 ou Local) ou do Body (Placeholder)
+  let imagemFinal = req.file ? (req.file.location || req.file.filename || req.file.path) : req.body.imagem_capa;
+
+  // Se for apenas o nome do arquivo local, adiciona o prefixo
+  if (req.file && !req.file.location && !String(imagemFinal).startsWith('http')) {
+      imagemFinal = `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${imagemFinal}`;
+  }
+
   const { 
     nome, produtor_email, categoria, descricao, data_inicio, 
     hora_inicio, local_nome, cidade, estado, moeda 
@@ -114,16 +103,16 @@ exports.criarEventoPresencial = async (req, res) => {
     `;
     
     const result = await db.query(query, [
-      limparCampo(nome, 'Novo Evento', 'nome'), 
+      limparCampo(nome, 'Novo Evento'), 
       produtor_email, 
-      limparCampo(categoria, 'Entretenimento', 'categoria'), 
-      limparCampo(descricao, '', 'descricao'), 
+      limparCampo(categoria, 'Entretenimento'), 
+      limparCampo(descricao, ''), 
       data_inicio, 
       hora_inicio, 
-      limparCampo(local_nome, '', 'local_nome'), 
+      limparCampo(local_nome, ''), 
       imagemFinal || null, 
-      limparCampo(cidade, '', 'cidade'), 
-      limparCampo(estado, '', 'estado'), 
+      limparCampo(cidade, ''), 
+      limparCampo(estado, ''), 
       moeda || 'BRL'
     ]);
 
@@ -133,40 +122,37 @@ exports.criarEventoPresencial = async (req, res) => {
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (VERSÃO FINAL ANTI-BUG) ---
+// --- 5. ATUALIZAR EVENTO ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
-
-  console.log(`\n--- [DEBUG START] ATUALIZANDO EVENTO ID: ${id} ---`);
-
   try {
     const check = await db.query('SELECT * FROM public.eventos WHERE id = $1', [id]);
     if (check.rowCount === 0) return res.status(404).json({ error: "Evento não encontrado" });
     const atual = check.rows[0];
 
-    // Lógica da Imagem: Prioridade para novo upload, depois link enviado, senão mantém a atual
     let imagemFinal = atual.imagem_capa;
+
     if (req.file) {
-      imagemFinal = req.file.location || req.file.path || req.file.filename;
-      if (!req.file.location && imagemFinal && !imagemFinal.startsWith('http')) {
+      // Prioridade total para novo upload
+      imagemFinal = req.file.location || req.file.filename || req.file.path;
+      if (!req.file.location && !String(imagemFinal).startsWith('http')) {
         imagemFinal = `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${imagemFinal}`;
       }
-    } else if (req.body.imagem_capa && req.body.imagem_capa !== "null" && req.body.imagem_capa !== "undefined") {
+    } else if (req.body.imagem_capa && req.body.imagem_capa !== "null" && req.body.imagem_capa !== "") {
+      // Se não subiu arquivo, mas mandou uma URL no corpo
       imagemFinal = req.body.imagem_capa;
     }
 
-    // Proteção rigorosa para campos de texto: se vier "undefined" ou vazio, mantém o que já existe
-    const nome = limparCampo(req.body.nome, atual.nome, 'nome');
-    const categoria = limparCampo(req.body.categoria, atual.categoria, 'categoria');
-    const descricao = limparCampo(req.body.descricao, atual.descricao, 'descricao');
-    const local_nome = limparCampo(req.body.local_nome, atual.local_nome, 'local_nome');
-    const cidade = limparCampo(req.body.cidade, atual.cidade, 'cidade');
-    const estado = limparCampo(req.body.estado, atual.estado, 'estado');
-    const status = limparCampo(req.body.status, atual.status, 'status');
-    const moeda = limparCampo(req.body.moeda, atual.moeda, 'moeda');
+    const nome = limparCampo(req.body.nome, atual.nome);
+    const categoria = limparCampo(req.body.categoria, atual.categoria);
+    const descricao = limparCampo(req.body.descricao, atual.descricao);
+    const local_nome = limparCampo(req.body.local_nome, atual.local_nome);
+    const cidade = limparCampo(req.body.cidade, atual.cidade);
+    const estado = limparCampo(req.body.estado, atual.estado);
+    const status = limparCampo(req.body.status, atual.status);
+    const moeda = limparCampo(req.body.moeda, atual.moeda);
 
-    // Data formatada corretamente (YYYY-MM-DD)
-    const data_inicio = (req.body.data_inicio && req.body.data_inicio !== "null" && req.body.data_inicio !== "undefined") 
+    const data_inicio = (req.body.data_inicio && req.body.data_inicio !== "null") 
       ? String(req.body.data_inicio).substring(0, 10) 
       : (atual.data_inicio ? new Date(atual.data_inicio).toISOString().substring(0, 10) : null);
 
@@ -183,7 +169,6 @@ exports.atualizarEvento = async (req, res) => {
     const values = [nome, categoria, descricao, data_inicio, local_nome, imagemFinal, cidade, estado, status, moeda, id];
     const result = await db.query(query, values);
     
-    console.log("[DEBUG] Sucesso! Nome final:", result.rows[0].nome);
     return res.status(200).json({ message: "Atualizado!", evento: result.rows[0] });
 
   } catch (err) {
@@ -192,19 +177,16 @@ exports.atualizarEvento = async (req, res) => {
   }
 };
 
-// --- 6. EXCLUIR EVENTO ---
+// --- RESTO DAS FUNÇÕES (Excluir, Ingressos, Status) MANTIDAS IGUAIS ---
 exports.excluirEvento = async (req, res) => {
   const { id } = req.params;
   try {
     await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
     await db.query('DELETE FROM public.eventos WHERE id = $1', [id]);
     res.status(200).json({ message: "Excluído com sucesso" });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
-// --- 7. SALVAR INGRESSOS ---
 exports.salvarIngressos = async (req, res) => {
   const { id } = req.params;
   const { ingressos, moeda_evento } = req.body; 
@@ -222,19 +204,14 @@ exports.salvarIngressos = async (req, res) => {
       await db.query('UPDATE public.eventos SET moeda = $1 WHERE id = $2', [moeda_evento, id]);
     }
     res.status(200).json({ message: "Ingressos salvos!" });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
-// --- 8. ATUALIZAR STATUS ---
 exports.atualizarStatus = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
   try {
     await db.query('UPDATE public.eventos SET status = $1 WHERE id = $2', [status, id]);
     res.status(200).json({ message: "Status atualizado" });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 };
