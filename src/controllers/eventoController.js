@@ -25,7 +25,7 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
       LEFT JOIN public.ingressos i ON e.id = i.evento_id
       WHERE e.status ILIKE 'Ativo'
       GROUP BY e.id, e.nome, e.imagem_capa, e.data_inicio, e.hora_inicio, 
-               e.local_nome, e.cidade, e.estado, e.categoria, e.tipo, e.status, e.moeda
+                e.local_nome, e.cidade, e.estado, e.categoria, e.tipo, e.status, e.moeda
       ORDER BY e.id DESC
     `;
     const result = await db.query(query);
@@ -43,7 +43,6 @@ exports.listarEventosPorProdutor = async (req, res) => {
 
   try {
     const emailLimpo = email.replace(/['"]+/g, '').trim().toLowerCase();
-    // Selecionamos explicitamente as colunas para garantir que imagem_capa venha
     const query = `SELECT * FROM public.eventos WHERE produtor_email = $1 ORDER BY id DESC`;
     const result = await db.query(query, [emailLimpo]);
     return res.status(200).json(result.rows);
@@ -81,12 +80,16 @@ exports.buscarEventoPorId = async (req, res) => {
 
 // --- 4. CRIAR EVENTO ---
 exports.criarEventoPresencial = async (req, res) => {
-  // Pega a imagem do Multer (S3 ou Local) ou do Body (Placeholder)
-  let imagemFinal = req.file ? (req.file.location || req.file.filename || req.file.path) : req.body.imagem_capa;
+  // Lógica de Imagem Anti-Undefined
+  let imagemFinal = null;
 
-  // Se for apenas o nome do arquivo local, adiciona o prefixo
-  if (req.file && !req.file.location && !String(imagemFinal).startsWith('http')) {
-      imagemFinal = `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${imagemFinal}`;
+  if (req.file) {
+    imagemFinal = req.file.location || req.file.filename || req.file.path;
+    if (!String(imagemFinal).startsWith('http')) {
+        imagemFinal = `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${imagemFinal}`;
+    }
+  } else if (req.body.imagem_capa && req.body.imagem_capa !== "undefined" && req.body.imagem_capa !== "null") {
+      imagemFinal = req.body.imagem_capa;
   }
 
   const { 
@@ -110,7 +113,7 @@ exports.criarEventoPresencial = async (req, res) => {
       data_inicio, 
       hora_inicio, 
       limparCampo(local_nome, ''), 
-      imagemFinal || null, 
+      imagemFinal, 
       limparCampo(cidade, ''), 
       limparCampo(estado, ''), 
       moeda || 'BRL'
@@ -122,7 +125,7 @@ exports.criarEventoPresencial = async (req, res) => {
   }
 };
 
-// --- 5. ATUALIZAR EVENTO ---
+// --- 5. ATUALIZAR EVENTO (COM TRAVA ANTI-UNDEFINED) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
   try {
@@ -130,16 +133,20 @@ exports.atualizarEvento = async (req, res) => {
     if (check.rowCount === 0) return res.status(404).json({ error: "Evento não encontrado" });
     const atual = check.rows[0];
 
+    // Lógica Blindada para Imagem
     let imagemFinal = atual.imagem_capa;
 
     if (req.file) {
-      // Prioridade total para novo upload
       imagemFinal = req.file.location || req.file.filename || req.file.path;
-      if (!req.file.location && !String(imagemFinal).startsWith('http')) {
+      if (!String(imagemFinal).startsWith('http')) {
         imagemFinal = `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${imagemFinal}`;
       }
-    } else if (req.body.imagem_capa && req.body.imagem_capa !== "null" && req.body.imagem_capa !== "") {
-      // Se não subiu arquivo, mas mandou uma URL no corpo
+    } else if (
+      req.body.imagem_capa && 
+      req.body.imagem_capa !== "undefined" && 
+      req.body.imagem_capa !== "null" &&
+      req.body.imagem_capa !== "[object Object]"
+    ) {
       imagemFinal = req.body.imagem_capa;
     }
 
@@ -152,7 +159,7 @@ exports.atualizarEvento = async (req, res) => {
     const status = limparCampo(req.body.status, atual.status);
     const moeda = limparCampo(req.body.moeda, atual.moeda);
 
-    const data_inicio = (req.body.data_inicio && req.body.data_inicio !== "null") 
+    const data_inicio = (req.body.data_inicio && req.body.data_inicio !== "null" && req.body.data_inicio !== "undefined") 
       ? String(req.body.data_inicio).substring(0, 10) 
       : (atual.data_inicio ? new Date(atual.data_inicio).toISOString().substring(0, 10) : null);
 
@@ -177,7 +184,7 @@ exports.atualizarEvento = async (req, res) => {
   }
 };
 
-// --- RESTO DAS FUNÇÕES (Excluir, Ingressos, Status) MANTIDAS IGUAIS ---
+// --- 6. EXCLUIR EVENTO ---
 exports.excluirEvento = async (req, res) => {
   const { id } = req.params;
   try {
@@ -187,6 +194,7 @@ exports.excluirEvento = async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
+// --- 7. SALVAR INGRESSOS ---
 exports.salvarIngressos = async (req, res) => {
   const { id } = req.params;
   const { ingressos, moeda_evento } = req.body; 
@@ -207,6 +215,7 @@ exports.salvarIngressos = async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
+// --- 8. ATUALIZAR STATUS ---
 exports.atualizarStatus = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
