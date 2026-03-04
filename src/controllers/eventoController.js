@@ -1,6 +1,6 @@
 const db = require('../config/database');
 
-// Lista oficial de categorias (Sincronizada com o Front-end)
+// Lista oficial de categorias
 const CATEGORIAS_VALIDAS = [
   'Arte & Cultura',
   'Entretenimento',
@@ -11,7 +11,16 @@ const CATEGORIAS_VALIDAS = [
   'Família & Comunidade'
 ];
 
-// --- 1. LISTAR TODOS OS EVENTOS (VITRINE COM PREÇO E MOEDA) ---
+// Função auxiliar para evitar que strings de erro do Front-end entrem no Banco
+const limparCampo = (valor, fallback, label) => {
+  if (valor === undefined || valor === null || valor === 'undefined' || valor === 'null' || valor === '') {
+    // console.log(`[DEBUG] Campo ${label} inválido, usando fallback.`);
+    return fallback;
+  }
+  return valor;
+};
+
+// --- 1. LISTAR TODOS OS EVENTOS (VITRINE) ---
 exports.listarTodosEventosParaVitrine = async (req, res) => {
   try {
     const query = `
@@ -36,15 +45,18 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
 // --- 2. LISTAR EVENTOS POR PRODUTOR (DASHBOARD) ---
 exports.listarEventosPorProdutor = async (req, res) => {
   const { email } = req.query; 
+  console.log("[DEBUG] Listando eventos para o email:", email);
+
   if (!email) return res.status(400).json({ error: "Email não fornecido" });
 
   try {
+    const emailLimpo = email.replace(/['"]+/g, '').trim().toLowerCase();
     const query = `
       SELECT * FROM public.eventos 
       WHERE produtor_email = $1 
-      ORDER BY data_inicio DESC
+      ORDER BY id DESC
     `;
-    const result = await db.query(query, [email.replace(/['"]+/g, '').trim().toLowerCase()]);
+    const result = await db.query(query, [emailLimpo]);
     return res.status(200).json(result.rows);
   } catch (err) {
     console.error("❌ Erro ao listar eventos do produtor:", err.message);
@@ -52,13 +64,9 @@ exports.listarEventosPorProdutor = async (req, res) => {
   }
 };
 
-// --- 3. BUSCAR EVENTO POR ID (DETALHES) ---
+// --- 3. BUSCAR EVENTO POR ID ---
 exports.buscarEventoPorId = async (req, res) => {
   const { id } = req.params;
-  const eventoId = parseInt(id);
-
-  if (isNaN(eventoId)) return res.status(400).json({ message: "ID inválido" });
-
   try {
     const query = `
       SELECT e.*, p.nome as produtor_nome, p.foto_perfil as produtor_foto
@@ -66,16 +74,13 @@ exports.buscarEventoPorId = async (req, res) => {
       LEFT JOIN public.produtores p ON e.produtor_email = p.email
       WHERE e.id = $1
     `;
-    const result = await db.query(query, [eventoId]);
-
+    const result = await db.query(query, [id]);
     if (result.rows.length === 0) return res.status(404).json({ message: "Evento não encontrado" });
 
     const evento = result.rows[0];
-
     if (evento.data_inicio) evento.data_inicio = new Date(evento.data_inicio).toISOString().split('T')[0];
-    if (evento.hora_inicio) evento.hora_inicio = evento.hora_inicio.toString().substring(0, 5);
-
-    const resIng = await db.query('SELECT * FROM public.ingressos WHERE evento_id = $1 ORDER BY preco ASC', [eventoId]);
+    
+    const resIng = await db.query('SELECT * FROM public.ingressos WHERE evento_id = $1 ORDER BY preco ASC', [id]);
     evento.ingressos = resIng.rows;
 
     return res.status(200).json(evento);
@@ -84,19 +89,17 @@ exports.buscarEventoPorId = async (req, res) => {
   }
 };
 
-// --- 4. CRIAR EVENTO PRESENCIAL ---
+// --- 4. CRIAR EVENTO ---
 exports.criarEventoPresencial = async (req, res) => {
-  // Se houver Multer configurado na rota de criação, pegamos req.file
+  console.log("[DEBUG] Criando evento. Body:", req.body);
+  console.log("[DEBUG] Arquivo recebido:", req.file ? req.file.originalname : "Nenhum");
+
   const imagemFinal = req.file ? (req.file.location || req.file.path) : req.body.imagem_capa;
   
   const { 
     nome, produtor_email, categoria, descricao, data_inicio, 
     hora_inicio, local_nome, cidade, estado, moeda 
   } = req.body;
-  
-  if (categoria && !CATEGORIAS_VALIDAS.includes(categoria)) {
-    return res.status(400).json({ error: `Categoria inválida.` });
-  }
 
   try {
     const query = `
@@ -106,88 +109,98 @@ exports.criarEventoPresencial = async (req, res) => {
       RETURNING id
     `;
     const result = await db.query(query, [
-      nome || 'Novo Evento', 
+      limparCampo(nome, 'Novo Evento', 'nome'), 
       produtor_email, 
-      categoria || 'Entretenimento', 
-      descricao || '', 
+      limparCampo(categoria, 'Entretenimento', 'categoria'), 
+      limparCampo(descricao, '', 'descricao'), 
       data_inicio, 
       hora_inicio, 
-      local_nome || '', 
+      limparCampo(local_nome, '', 'local_nome'), 
       imagemFinal || null, 
-      cidade || '', 
-      estado || '', 
+      limparCampo(cidade, '', 'cidade'), 
+      limparCampo(estado, '', 'estado'), 
       moeda || 'BRL'
     ]);
     res.status(201).json({ message: "Evento criado!", id: result.rows[0].id });
   } catch (err) {
-    console.error("❌ Erro ao criar:", err.message);
     res.status(500).json({ error: err.message });
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (SISTEMA ANTI-BUG DE NOME E IMAGEM) ---
+// --- 5. ATUALIZAR EVENTO (COM DEBUG E ANTI-BUG) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
 
+  // LOGS DE DEBUG NO TERMINAL AWS
+  console.log(`\n--- [DEBUG START] ATUALIZANDO EVENTO ID: ${id} ---`);
+  console.log("Headers:", req.headers['content-type']);
+  console.log("Body Recebido:", JSON.stringify(req.body));
+  console.log("Arquivo (req.file):", req.file ? {
+    nome: req.file.originalname,
+    path: req.file.path,
+    location: req.file.location
+  } : "Nenhum arquivo enviado");
+
   try {
-    // Busca dados atuais para não perder nada se o Front enviar vazio
+    // Busca dados atuais para persistência
     const check = await db.query('SELECT * FROM public.eventos WHERE id = $1', [id]);
-    if (check.rowCount === 0) return res.status(404).json({ error: "Evento não encontrado" });
+    if (check.rowCount === 0) {
+      console.log("[DEBUG] Evento não encontrado no Banco.");
+      return res.status(404).json({ error: "Evento não encontrado" });
+    }
     const atual = check.rows[0];
 
-    // Lógica da Imagem: Prioridade 1 (Novo Arquivo), Prioridade 2 (URL enviada), Prioridade 3 (Mantém a que já existe)
+    // Lógica da Imagem
     let imagemFinal = atual.imagem_capa;
     if (req.file) {
       imagemFinal = req.file.location || req.file.path || req.file.filename;
-      // Se for local, garante a URL
       if (!req.file.location && !imagemFinal.startsWith('http')) {
         imagemFinal = `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${imagemFinal}`;
       }
-    } else if (req.body.imagem_capa) {
-      imagemFinal = req.body.imagem_capa;
+      console.log("[DEBUG] Nova imagem processada:", imagemFinal);
+    } else {
+      imagemFinal = limparCampo(req.body.imagem_capa, atual.imagem_capa, 'imagem_capa');
     }
 
-    // Tratamento de campos para evitar "undefined" no banco
-    const nome = (req.body.nome && req.body.nome !== 'undefined') ? req.body.nome : atual.nome;
-    const categoria = (req.body.categoria && req.body.categoria !== 'undefined') ? req.body.categoria : atual.categoria;
-    const descricao = req.body.descricao !== undefined ? req.body.descricao : atual.descricao;
-    const local_nome = req.body.local_nome !== undefined ? req.body.local_nome : atual.local_nome;
-    const cidade = req.body.cidade !== undefined ? req.body.cidade : atual.cidade;
-    const estado = req.body.estado !== undefined ? req.body.estado : atual.estado;
-    const moeda = req.body.moeda !== undefined ? req.body.moeda : atual.moeda;
-    const status = req.body.status !== undefined ? req.body.status : atual.status;
-    const link_transmissao = req.body.link_transmissao !== undefined ? req.body.link_transmissao : atual.link_transmissao;
+    // Tratamento Anti-Bug
+    const nome = limparCampo(req.body.nome, atual.nome, 'nome');
+    const categoria = limparCampo(req.body.categoria, atual.categoria, 'categoria');
+    const descricao = limparCampo(req.body.descricao, atual.descricao, 'descricao');
+    const local_nome = limparCampo(req.body.local_nome, atual.local_nome, 'local_nome');
+    const cidade = limparCampo(req.body.cidade, atual.cidade, 'cidade');
+    const estado = limparCampo(req.body.estado, atual.estado, 'estado');
+    const moeda = limparCampo(req.body.moeda, atual.moeda, 'moeda');
+    const status = limparCampo(req.body.status, atual.status, 'status');
 
     const data_inicio = (req.body.data_inicio && req.body.data_inicio !== "null" && req.body.data_inicio !== "undefined") 
       ? String(req.body.data_inicio).substring(0, 10) 
       : atual.data_inicio;
-
-    const hora_inicio = (req.body.hora_inicio && req.body.hora_inicio !== "undefined") 
-      ? String(req.body.hora_inicio).substring(0, 5) 
-      : atual.hora_inicio;
 
     const query = `
       UPDATE public.eventos 
       SET 
         nome = $1, categoria = $2, descricao = $3, data_inicio = $4, 
         local_nome = $5, imagem_capa = $6, cidade = $7, estado = $8, 
-        hora_inicio = $9, link_transmissao = $10, status = $11, moeda = $12
-      WHERE id = $13
+        status = $9, moeda = $10
+      WHERE id = $11
       RETURNING *
     `;
     
     const values = [
       nome, categoria, descricao, data_inicio, 
       local_nome, imagemFinal, cidade, estado, 
-      hora_inicio, link_transmissao, status, moeda,
-      id
+      status, moeda, id
     ];
 
     const result = await db.query(query, values);
-    return res.status(200).json({ message: "Evento atualizado com sucesso", evento: result.rows[0] });
+    
+    console.log("[DEBUG] Update concluído. Nome salvo:", result.rows[0].nome);
+    console.log("--- [DEBUG END] ---\n");
+
+    return res.status(200).json({ message: "Atualizado!", evento: result.rows[0] });
 
   } catch (err) {
-    console.error("❌ Erro ao atualizar:", err.message);
+    console.error("❌ ERRO CRÍTICO NO UPDATE:", err);
     return res.status(500).json({ error: "Erro interno no servidor" });
   }
 };
@@ -196,12 +209,8 @@ exports.atualizarEvento = async (req, res) => {
 exports.excluirEvento = async (req, res) => {
   const { id } = req.params;
   try {
-    // Exclui ingressos primeiro por causa da chave estrangeira
     await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
-    const resDel = await db.query('DELETE FROM public.eventos WHERE id = $1', [id]);
-    
-    if (resDel.rowCount === 0) return res.status(404).json({ error: "Evento não encontrado" });
-    
+    await db.query('DELETE FROM public.eventos WHERE id = $1', [id]);
     res.status(200).json({ message: "Excluído com sucesso" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -212,7 +221,6 @@ exports.excluirEvento = async (req, res) => {
 exports.salvarIngressos = async (req, res) => {
   const { id } = req.params;
   const { ingressos, moeda_evento } = req.body; 
-
   try {
     await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
     if (ingressos && Array.isArray(ingressos)) {
