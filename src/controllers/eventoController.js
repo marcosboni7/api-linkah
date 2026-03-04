@@ -6,8 +6,16 @@ const CATEGORIAS_VALIDAS = [
   'Experiências & Lifestyle', 'Família & Comunidade'
 ];
 
+// Função de limpeza para evitar lixo no banco
 const limparCampo = (valor, fallback) => {
-  if (valor === undefined || valor === null || valor === 'undefined' || valor === 'null' || String(valor).trim() === '') {
+  if (
+    valor === undefined || 
+    valor === null || 
+    valor === 'undefined' || 
+    valor === 'null' || 
+    String(valor).trim() === '' ||
+    String(valor).includes('[object Object]')
+  ) {
     return fallback;
   }
   return valor;
@@ -19,7 +27,10 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
     const query = `
       SELECT 
         e.id, e.nome, 
-        CASE WHEN e.imagem_capa = 'undefined' OR e.imagem_capa = 'null' THEN NULL ELSE e.imagem_capa END as imagem_capa, 
+        CASE 
+          WHEN e.imagem_capa ILIKE '%undefined%' OR e.imagem_capa ILIKE '%null%' THEN NULL 
+          ELSE e.imagem_capa 
+        END as imagem_capa, 
         e.data_inicio, e.hora_inicio, 
         e.local_nome, e.cidade, e.estado, e.categoria, e.tipo, e.status, e.moeda,
         COALESCE(MIN(i.preco), 0) as preco_minimo
@@ -38,7 +49,7 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
   }
 };
 
-// --- 2. LISTAR EVENTOS POR PRODUTOR (DASHBOARD) ---
+// --- 2. LISTAR EVENTOS POR PRODUTOR ---
 exports.listarEventosPorProdutor = async (req, res) => {
   const { email } = req.query; 
   if (!email) return res.status(400).json({ error: "Email não fornecido" });
@@ -47,7 +58,10 @@ exports.listarEventosPorProdutor = async (req, res) => {
     const emailLimpo = email.replace(/['"]+/g, '').trim().toLowerCase();
     const query = `
       SELECT *, 
-      CASE WHEN imagem_capa = 'undefined' OR imagem_capa = 'null' THEN NULL ELSE imagem_capa END as imagem_capa 
+      CASE 
+        WHEN imagem_capa ILIKE '%undefined%' OR imagem_capa ILIKE '%null%' THEN NULL 
+        ELSE imagem_capa 
+      END as imagem_capa 
       FROM public.eventos 
       WHERE produtor_email = $1 
       ORDER BY id DESC
@@ -65,7 +79,10 @@ exports.buscarEventoPorId = async (req, res) => {
   try {
     const query = `
       SELECT e.*, 
-      CASE WHEN e.imagem_capa = 'undefined' OR e.imagem_capa = 'null' THEN NULL ELSE e.imagem_capa END as imagem_capa,
+      CASE 
+        WHEN e.imagem_capa ILIKE '%undefined%' OR e.imagem_capa ILIKE '%null%' THEN NULL 
+        ELSE e.imagem_capa 
+      END as imagem_capa,
       p.nome as produtor_nome, p.foto_perfil as produtor_foto
       FROM public.eventos e
       LEFT JOIN public.produtores p ON e.produtor_email = p.email
@@ -93,12 +110,12 @@ exports.criarEventoPresencial = async (req, res) => {
   let imagemFinal = null;
 
   if (req.file) {
-    imagemFinal = req.file.location || req.file.filename || req.file.path;
-    if (!String(imagemFinal).startsWith('http')) {
-        imagemFinal = `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${imagemFinal}`;
+    const arquivo = req.file.location || req.file.filename || req.file.path;
+    if (arquivo && arquivo !== 'undefined') {
+        imagemFinal = String(arquivo).startsWith('http') 
+            ? arquivo 
+            : `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${arquivo}`;
     }
-  } else if (req.body.imagem_capa && req.body.imagem_capa !== "undefined" && req.body.imagem_capa !== "null") {
-      imagemFinal = req.body.imagem_capa;
   }
 
   const { 
@@ -134,37 +151,39 @@ exports.criarEventoPresencial = async (req, res) => {
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (Lógica de Nome e Imagem Consertada) ---
+// --- 5. ATUALIZAR EVENTO (CORRIGIDO COM SUA LÓGICA) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
   try {
+    // Busca os dados atuais para fallback
     const check = await db.query('SELECT * FROM public.eventos WHERE id = $1', [id]);
     if (check.rowCount === 0) return res.status(404).json({ error: "Evento não encontrado" });
     const atual = check.rows[0];
 
-    // --- Lógica Blindada para Imagem ---
+    // ✅ CORREÇÃO DA IMAGEM:
     let imagemFinal = atual.imagem_capa;
 
     if (req.file) {
-      // Prioridade 1: Novo arquivo físico enviado
-      imagemFinal = req.file.location || req.file.filename || req.file.path;
-      if (!String(imagemFinal).startsWith('http')) {
-        imagemFinal = `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${imagemFinal}`;
+      // Se subiu foto nova, montamos a URL
+      const arquivo = req.file.location || req.file.filename || req.file.path;
+      if (arquivo && arquivo !== 'undefined') {
+          imagemFinal = `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${arquivo}`;
+          console.log("📸 Nova imagem detectada e salva:", imagemFinal);
       }
     } else {
-        // Prioridade 2: Verifica se veio uma URL no body que não seja lixo
-        const imgBody = req.body.imagem_capa;
-        const isLixo = !imgBody || 
-                       imgBody === "undefined" || 
-                       imgBody === "null" || 
-                       imgBody === "[object Object]";
-        
-        if (!isLixo) {
-            imagemFinal = imgBody;
-        }
+      // Se não subiu foto, verificamos se o body mandou lixo
+      const imgBody = req.body.imagem_capa;
+      const isLixo = !imgBody || imgBody === "undefined" || imgBody === "null" || String(imgBody).includes("/undefined");
+      
+      if (isLixo) {
+          console.log("ℹ️ Mantendo imagem atual para evitar 'undefined'");
+          imagemFinal = atual.imagem_capa;
+      } else {
+          imagemFinal = imgBody;
+      }
     }
 
-    // --- Limpeza de Campos ---
+    // Limpeza de campos para o UPDATE
     const nome = limparCampo(req.body.nome, atual.nome);
     const categoria = limparCampo(req.body.categoria, atual.categoria);
     const descricao = limparCampo(req.body.descricao, atual.descricao);
@@ -174,11 +193,11 @@ exports.atualizarEvento = async (req, res) => {
     const status = limparCampo(req.body.status, atual.status);
     const moeda = limparCampo(req.body.moeda, atual.moeda);
 
-    const data_inicio = (req.body.data_inicio && req.body.data_inicio !== "null" && req.body.data_inicio !== "undefined") 
+    const data_inicio = (req.body.data_inicio && req.body.data_inicio !== "null") 
       ? String(req.body.data_inicio).substring(0, 10) 
       : (atual.data_inicio ? new Date(atual.data_inicio).toISOString().substring(0, 10) : null);
 
-    const query = `
+    const queryUpdate = `
       UPDATE public.eventos 
       SET 
         nome = $1, categoria = $2, descricao = $3, data_inicio = $4, 
@@ -189,9 +208,9 @@ exports.atualizarEvento = async (req, res) => {
     `;
     
     const values = [nome, categoria, descricao, data_inicio, local_nome, imagemFinal, cidade, estado, status, moeda, id];
-    const result = await db.query(query, values);
+    const result = await db.query(queryUpdate, values);
     
-    return res.status(200).json({ message: "Atualizado!", evento: result.rows[0] });
+    return res.status(200).json({ message: "Atualizado com sucesso!", evento: result.rows[0] });
 
   } catch (err) {
     console.error("❌ ERRO NO UPDATE:", err);
