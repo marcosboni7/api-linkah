@@ -11,9 +11,15 @@ const CATEGORIAS_VALIDAS = [
   'Família & Comunidade'
 ];
 
-// Função auxiliar para evitar que strings de erro do Front-end entrem no Banco
+// Função auxiliar aprimorada para evitar que lixo do Front-end entre no Banco
 const limparCampo = (valor, fallback, label) => {
-  if (valor === undefined || valor === null || valor === 'undefined' || valor === 'null' || valor === '') {
+  if (
+    valor === undefined || 
+    valor === null || 
+    valor === 'undefined' || 
+    valor === 'null' || 
+    String(valor).trim() === ''
+  ) {
     return fallback;
   }
   return valor;
@@ -75,7 +81,9 @@ exports.buscarEventoPorId = async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ message: "Evento não encontrado" });
 
     const evento = result.rows[0];
-    if (evento.data_inicio) evento.data_inicio = new Date(evento.data_inicio).toISOString().split('T')[0];
+    if (evento.data_inicio) {
+        evento.data_inicio = new Date(evento.data_inicio).toISOString().split('T')[0];
+    }
     
     const resIng = await db.query('SELECT * FROM public.ingressos WHERE evento_id = $1 ORDER BY preco ASC', [id]);
     evento.ingressos = resIng.rows;
@@ -88,9 +96,8 @@ exports.buscarEventoPorId = async (req, res) => {
 
 // --- 4. CRIAR EVENTO ---
 exports.criarEventoPresencial = async (req, res) => {
-  console.log("\n--- [DEBUG] CRIANDO EVENTO PRESENCIAL ---");
+  console.log("\n--- [DEBUG] CRIANDO EVENTO ---");
   
-  // Imagem via Multer ou Body
   const imagemFinal = req.file ? (req.file.location || req.file.path) : req.body.imagem_capa;
   
   const { 
@@ -107,7 +114,7 @@ exports.criarEventoPresencial = async (req, res) => {
     `;
     
     const result = await db.query(query, [
-      limparCampo(nome, 'Novo Evento Sem Nome', 'nome'), 
+      limparCampo(nome, 'Novo Evento', 'nome'), 
       produtor_email, 
       limparCampo(categoria, 'Entretenimento', 'categoria'), 
       limparCampo(descricao, '', 'descricao'), 
@@ -120,50 +127,45 @@ exports.criarEventoPresencial = async (req, res) => {
       moeda || 'BRL'
     ]);
 
-    console.log("[DEBUG] Evento criado com ID:", result.rows[0].id);
     res.status(201).json({ message: "Evento criado!", id: result.rows[0].id });
   } catch (err) {
-    console.error("❌ Erro ao criar evento:", err.message);
     res.status(500).json({ error: err.message });
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (BLINDADO) ---
+// --- 5. ATUALIZAR EVENTO (VERSÃO FINAL ANTI-BUG) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
 
   console.log(`\n--- [DEBUG START] ATUALIZANDO EVENTO ID: ${id} ---`);
-  console.log("Body Recebido:", JSON.stringify(req.body));
 
   try {
     const check = await db.query('SELECT * FROM public.eventos WHERE id = $1', [id]);
     if (check.rowCount === 0) return res.status(404).json({ error: "Evento não encontrado" });
-    
     const atual = check.rows[0];
 
-    // Lógica da Imagem
+    // Lógica da Imagem: Prioridade para novo upload, depois link enviado, senão mantém a atual
     let imagemFinal = atual.imagem_capa;
     if (req.file) {
       imagemFinal = req.file.location || req.file.path || req.file.filename;
-      // Ajuste para caminhos locais se não for S3
       if (!req.file.location && imagemFinal && !imagemFinal.startsWith('http')) {
         imagemFinal = `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${imagemFinal}`;
       }
-    } else {
-      imagemFinal = limparCampo(req.body.imagem_capa, atual.imagem_capa, 'imagem_capa');
+    } else if (req.body.imagem_capa && req.body.imagem_capa !== "null" && req.body.imagem_capa !== "undefined") {
+      imagemFinal = req.body.imagem_capa;
     }
 
-    // Tratamento dos campos para evitar "undefined" ou "null" de strings
+    // Proteção rigorosa para campos de texto: se vier "undefined" ou vazio, mantém o que já existe
     const nome = limparCampo(req.body.nome, atual.nome, 'nome');
     const categoria = limparCampo(req.body.categoria, atual.categoria, 'categoria');
     const descricao = limparCampo(req.body.descricao, atual.descricao, 'descricao');
     const local_nome = limparCampo(req.body.local_nome, atual.local_nome, 'local_nome');
     const cidade = limparCampo(req.body.cidade, atual.cidade, 'cidade');
     const estado = limparCampo(req.body.estado, atual.estado, 'estado');
-    const moeda = limparCampo(req.body.moeda, atual.moeda, 'moeda');
     const status = limparCampo(req.body.status, atual.status, 'status');
+    const moeda = limparCampo(req.body.moeda, atual.moeda, 'moeda');
 
-    // Tratamento especial para data
+    // Data formatada corretamente (YYYY-MM-DD)
     const data_inicio = (req.body.data_inicio && req.body.data_inicio !== "null" && req.body.data_inicio !== "undefined") 
       ? String(req.body.data_inicio).substring(0, 10) 
       : (atual.data_inicio ? new Date(atual.data_inicio).toISOString().substring(0, 10) : null);
@@ -178,19 +180,14 @@ exports.atualizarEvento = async (req, res) => {
       RETURNING *
     `;
     
-    const values = [
-      nome, categoria, descricao, data_inicio, 
-      local_nome, imagemFinal, cidade, estado, 
-      status, moeda, id
-    ];
-
+    const values = [nome, categoria, descricao, data_inicio, local_nome, imagemFinal, cidade, estado, status, moeda, id];
     const result = await db.query(query, values);
-    console.log("[DEBUG] Nome salvo no Banco:", result.rows[0].nome);
     
+    console.log("[DEBUG] Sucesso! Nome final:", result.rows[0].nome);
     return res.status(200).json({ message: "Atualizado!", evento: result.rows[0] });
 
   } catch (err) {
-    console.error("❌ ERRO CRÍTICO NO UPDATE:", err);
+    console.error("❌ ERRO NO UPDATE:", err);
     return res.status(500).json({ error: "Erro interno no servidor" });
   }
 };
