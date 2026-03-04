@@ -112,6 +112,7 @@ exports.criarEventoPresencial = async (req, res) => {
   if (req.file) {
     const arquivo = req.file.location || req.file.filename || req.file.path;
     if (arquivo && arquivo !== 'undefined') {
+        // Se já for uma URL (S3), usa direto. Se for local, anexa o domínio.
         imagemFinal = String(arquivo).startsWith('http') 
             ? arquivo 
             : `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${arquivo}`;
@@ -151,39 +152,37 @@ exports.criarEventoPresencial = async (req, res) => {
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (CORRIGIDO COM SUA LÓGICA) ---
+// --- 5. ATUALIZAR EVENTO (COM LÓGICA DE PERSISTÊNCIA DE IMAGEM) ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
   try {
-    // Busca os dados atuais para fallback
     const check = await db.query('SELECT * FROM public.eventos WHERE id = $1', [id]);
     if (check.rowCount === 0) return res.status(404).json({ error: "Evento não encontrado" });
     const atual = check.rows[0];
 
-    // ✅ CORREÇÃO DA IMAGEM:
+    // Lógica de Imagem
     let imagemFinal = atual.imagem_capa;
 
     if (req.file) {
-      // Se subiu foto nova, montamos a URL
       const arquivo = req.file.location || req.file.filename || req.file.path;
       if (arquivo && arquivo !== 'undefined') {
-          imagemFinal = `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${arquivo}`;
-          console.log("📸 Nova imagem detectada e salva:", imagemFinal);
+          imagemFinal = String(arquivo).startsWith('http') 
+            ? arquivo 
+            : `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${arquivo}`;
+          console.log("📸 Nova imagem detectada:", imagemFinal);
       }
     } else {
-      // Se não subiu foto, verificamos se o body mandou lixo
       const imgBody = req.body.imagem_capa;
       const isLixo = !imgBody || imgBody === "undefined" || imgBody === "null" || String(imgBody).includes("/undefined");
       
       if (isLixo) {
-          console.log("ℹ️ Mantendo imagem atual para evitar 'undefined'");
-          imagemFinal = atual.imagem_capa;
+          imagemFinal = atual.imagem_capa; // Mantém a que já estava no banco
       } else {
-          imagemFinal = imgBody;
+          imagemFinal = imgBody; // Usa a que veio do body (se for URL válida)
       }
     }
 
-    // Limpeza de campos para o UPDATE
+    // Limpeza de campos
     const nome = limparCampo(req.body.nome, atual.nome);
     const categoria = limparCampo(req.body.categoria, atual.categoria);
     const descricao = limparCampo(req.body.descricao, atual.descricao);
