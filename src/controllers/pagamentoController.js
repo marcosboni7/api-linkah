@@ -2,7 +2,7 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const db = require('../config/database');
 const { enviarIngressoEmail } = require('../services/emailService');
 
-// --- 1. CRIAR SESSÃO DE CHECKOUT (CARTÃO COM SPLIT) ---
+// --- 1. CRIAR SESSÃO DE CHECKOUT ---
 exports.criarSessaoCheckout = async (req, res) => {
     try {
         const { evento, usuarioEmail, quantidade } = req.body;
@@ -119,7 +119,7 @@ exports.verificarStatusStripe = async (req, res) => {
     }
 };
 
-// --- 4. WEBHOOK (CONFIRMAÇÃO VIA STRIPE) ---
+// --- 4. WEBHOOK ---
 exports.webhookStripe = async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
@@ -136,7 +136,6 @@ exports.webhookStripe = async (req, res) => {
         const meta = session.metadata;
 
         try {
-            // Verifica se já foi salvo para não duplicar
             const existe = await db.query("SELECT id FROM public.compras WHERE stripe_session_id = $1", [session.id]);
             if (existe.rows.length === 0) {
                 await db.query(`
@@ -145,23 +144,25 @@ exports.webhookStripe = async (req, res) => {
                     VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7)
                 `, [meta.usuarioEmail, parseInt(meta.eventoId), meta.tituloEvento, new Date(), parseInt(meta.quantidade), session.amount_total / 100, session.id]);
 
-                enviarIngressoEmail(meta.usuarioEmail, { 
+                // Envio de e-mail com AWAIT
+                await enviarIngressoEmail(meta.usuarioEmail, { 
                     tituloEvento: meta.tituloEvento, 
                     quantidade: meta.quantidade, 
                     linkIngresso: `${process.env.FRONTEND_URL}/pagamento/sucesso?session_id=${session.id}`, 
                     dataEvento: meta.dataEvento, 
                     horaEvento: meta.horaEvento, 
                     localEvento: meta.localEvento 
-                }).catch(e => console.error("📧 Erro e-mail:", e.message));
+                });
+                console.log("✅ E-mail enviado via Webhook");
             }
         } catch (err) {
-            console.error("❌ Erro no banco (Webhook):", err.message);
+            console.error("❌ Erro no banco/email (Webhook):", err.message);
         }
     }
     res.json({ received: true });
 };
 
-// --- 5. CONSULTA (COM VERIFICAÇÃO ATIVA SE ESTIVER VAZIO) ---
+// --- 5. CONSULTA E RECUPERAÇÃO ATIVA ---
 exports.buscarDetalhesCompra = async (req, res) => {
     try {
         const { sessionId } = req.params;
@@ -178,12 +179,14 @@ exports.buscarDetalhesCompra = async (req, res) => {
             return res.json(result.rows[0]);
         }
 
-        // 2. SE NÃO ACHOU, VERIFICA DIRETO NO STRIPE (Salva na hora se estiver pago)
-        console.log(`🔍 Compra ${sessionId} não encontrada. Verificando API Stripe...`);
+        // 2. SE NÃO ACHOU, VERIFICA DIRETO NO STRIPE
+        console.log(`🔍 Compra ${sessionId} não encontrada no banco. Verificando API Stripe...`);
         const session = await stripe.checkout.sessions.retrieve(sessionId);
 
         if (session.payment_status === 'paid') {
             const meta = session.metadata;
+            
+            // 3. SALVA NO BANCO (PLANO B)
             const insertQuery = `
                 INSERT INTO public.compras 
                 (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
@@ -201,9 +204,25 @@ exports.buscarDetalhesCompra = async (req, res) => {
                 session.id
             ];
 
-            const novaCompra = await db.query(insertQuery, insertValues);
-            console.log("✅ Compra recuperada e salva com sucesso!");
-            return res.json(novaCompra.rows[0]);
+            const novaCompraResult = await db.query(insertQuery, insertValues);
+            const compraSalva = novaCompraResult.rows[0];
+
+            // 4. DISPARA O E-MAIL TAMBÉM NO PLANO B (Caso o webhook tenha falhado)
+            try {
+                await enviarIngressoEmail(meta.usuarioEmail, { 
+                    tituloEvento: meta.tituloEvento, 
+                    quantidade: meta.quantidade, 
+                    linkIngresso: `${process.env.FRONTEND_URL}/pagamento/sucesso?session_id=${session.id}`, 
+                    dataEvento: meta.dataEvento, 
+                    horaEvento: meta.horaEvento, 
+                    localEvento: meta.localEvento 
+                });
+                console.log("✅ E-mail enviado via Recuperação Ativa");
+            } catch (e) {
+                console.error("📧 Erro ao enviar e-mail na recuperação:", e.message);
+            }
+
+            return res.json(compraSalva);
         }
 
         res.status(404).json({ error: "Compra não processada ainda." });
