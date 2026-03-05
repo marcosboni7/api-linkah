@@ -69,6 +69,7 @@ exports.listarEventosPorProdutor = async (req, res) => {
     const result = await db.query(query, [emailLimpo]);
     return res.status(200).json(result.rows);
   } catch (err) {
+    console.error("❌ Erro ao listar por produtor:", err.message);
     return res.status(500).json({ error: err.message });
   }
 };
@@ -101,125 +102,132 @@ exports.buscarEventoPorId = async (req, res) => {
 
     return res.status(200).json(evento);
   } catch (err) { 
+    console.error("❌ Erro ao buscar por ID:", err.message);
     return res.status(500).json({ error: err.message }); 
   }
 };
 
-// --- 4. CRIAR EVENTO ---
+// --- 4. CRIAR EVENTO PRESENCIAL ---
 exports.criarEventoPresencial = async (req, res) => {
+  console.log("--- 🚀 INICIANDO CRIAÇÃO DE EVENTO ---");
+  console.log("📦 Body recebido:", req.body);
+  
   let imagemFinal = null;
-
   if (req.file) {
-    // CORREÇÃO: Salva apenas o nome do arquivo (filename) ou a localização (S3)
-    const arquivo = req.file.location || req.file.filename || req.file.path;
-    if (arquivo && arquivo !== 'undefined') {
-        // Se for uma URL completa (S3/Cloud), mantém. Se for local, salva só o nome.
-        imagemFinal = String(arquivo).startsWith('http') 
-            ? arquivo 
-            : req.file.filename; 
+    imagemFinal = req.file.location || req.file.filename || req.file.path;
+    if (imagemFinal && !String(imagemFinal).startsWith('http')) {
+      imagemFinal = req.file.filename;
     }
+    console.log("📸 Arquivo de imagem detectado:", imagemFinal);
   }
 
   const { 
     nome, produtor_email, categoria, descricao, data_inicio, 
-    hora_inicio, local_nome, cidade, estado, moeda 
+    hora_inicio, data_termino, hora_termino, local_nome, 
+    cep, endereco, numero, complemento, cidade, estado, 
+    capacidade, moeda, tipo, regras, visibilidade 
   } = req.body;
 
   try {
     const query = `
       INSERT INTO public.eventos 
-      (nome, produtor_email, categoria, descricao, data_inicio, hora_inicio, local_nome, imagem_capa, cidade, estado, tipo, status, moeda)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'presencial', 'Ativo', $11)
+      (
+        nome, produtor_email, categoria, descricao, data_inicio, 
+        hora_inicio, data_termino, hora_termino, local_nome, 
+        cep, endereco, numero, complemento, cidade, estado, 
+        capacidade, imagem_capa, tipo, status, moeda, regras, visibilidade
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 'Ativo', $19, $20, $21)
       RETURNING id
     `;
     
-    const result = await db.query(query, [
+    const values = [
       limparCampo(nome, 'Novo Evento'), 
-      produtor_email, 
+      produtor_email ? produtor_email.toLowerCase() : null, 
       limparCampo(categoria, 'Entretenimento'), 
       limparCampo(descricao, ''), 
-      data_inicio, 
-      hora_inicio, 
+      data_inicio || null, 
+      hora_inicio || null,
+      data_termino || null,
+      hora_termino || null,
       limparCampo(local_nome, ''), 
-      imagemFinal, 
+      limparCampo(cep, ''),
+      limparCampo(endereco, ''),
+      limparCampo(numero, ''),
+      limparCampo(complemento, ''),
       limparCampo(cidade, ''), 
       limparCampo(estado, ''), 
-      moeda || 'BRL'
-    ]);
+      parseInt(capacidade) || 0,
+      imagemFinal, 
+      tipo || 'Presencial',
+      moeda || 'BRL',
+      limparCampo(regras, ''),
+      visibilidade || 'Publico'
+    ];
 
+    const result = await db.query(query, values);
+    console.log("✅ Evento salvo com sucesso! ID:", result.rows[0].id);
     res.status(201).json({ message: "Evento criado!", id: result.rows[0].id });
+
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("❌ ERRO NO INSERT (500):", err.message);
+    res.status(500).json({ error: err.message, detail: err.detail });
   }
 };
 
 // --- 5. ATUALIZAR EVENTO ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
+  console.log(`--- 🔄 ATUALIZANDO EVENTO ID: ${id} ---`);
+  
   try {
     const check = await db.query('SELECT * FROM public.eventos WHERE id = $1', [id]);
     if (check.rowCount === 0) return res.status(404).json({ error: "Evento não encontrado" });
     const atual = check.rows[0];
 
-    // Lógica de Imagem Corrigida: Salva apenas o nome do arquivo
     let imagemFinal = atual.imagem_capa;
 
     if (req.file) {
       const arquivo = req.file.location || req.file.filename || req.file.path;
-      if (arquivo && arquivo !== 'undefined') {
-          imagemFinal = String(arquivo).startsWith('http') 
-            ? arquivo 
-            : req.file.filename; 
-          console.log("📸 Nova imagem detectada (salvando nome):", imagemFinal);
-      }
-    } else {
+      imagemFinal = String(arquivo).startsWith('http') ? arquivo : req.file.filename;
+      console.log("📸 Nova imagem para atualização:", imagemFinal);
+    } else if (req.body.imagem_capa) {
       const imgBody = req.body.imagem_capa;
       const isLixo = !imgBody || imgBody === "undefined" || imgBody === "null" || String(imgBody).includes("/undefined");
-      
-      if (isLixo) {
-          imagemFinal = atual.imagem_capa; // Mantém a que já estava no banco
-      } else {
-          // Se for uma URL completa enviada pelo body, limpamos para manter apenas o nome se for do nosso domínio
-          if (typeof imgBody === 'string' && imgBody.includes('/uploads/')) {
-             imagemFinal = imgBody.split('/uploads/').pop();
-          } else {
-             imagemFinal = imgBody;
-          }
+      if (!isLixo) {
+        imagemFinal = typeof imgBody === 'string' && imgBody.includes('/uploads/') ? imgBody.split('/uploads/').pop() : imgBody;
       }
     }
 
-    // Limpeza de campos
-    const nome = limparCampo(req.body.nome, atual.nome);
-    const categoria = limparCampo(req.body.categoria, atual.categoria);
-    const descricao = limparCampo(req.body.descricao, atual.descricao);
-    const local_nome = limparCampo(req.body.local_nome, atual.local_nome);
-    const cidade = limparCampo(req.body.cidade, atual.cidade);
-    const estado = limparCampo(req.body.estado, atual.estado);
-    const status = limparCampo(req.body.status, atual.status);
-    const moeda = limparCampo(req.body.moeda, atual.moeda);
-
-    const data_inicio = (req.body.data_inicio && req.body.data_inicio !== "null") 
-      ? String(req.body.data_inicio).substring(0, 10) 
-      : (atual.data_inicio ? new Date(atual.data_inicio).toISOString().substring(0, 10) : null);
+    const values = [
+      limparCampo(req.body.nome, atual.nome),
+      limparCampo(req.body.categoria, atual.categoria),
+      limparCampo(req.body.descricao, atual.descricao),
+      (req.body.data_inicio && req.body.data_inicio !== "null") ? String(req.body.data_inicio).substring(0, 10) : (atual.data_inicio ? new Date(atual.data_inicio).toISOString().substring(0, 10) : null),
+      limparCampo(req.body.local_nome, atual.local_nome),
+      imagemFinal,
+      limparCampo(req.body.cidade, atual.cidade),
+      limparCampo(req.body.estado, atual.estado),
+      limparCampo(req.body.status, atual.status),
+      limparCampo(req.body.moeda, atual.moeda),
+      id
+    ];
 
     const queryUpdate = `
       UPDATE public.eventos 
-      SET 
-        nome = $1, categoria = $2, descricao = $3, data_inicio = $4, 
-        local_nome = $5, imagem_capa = $6, cidade = $7, estado = $8, 
-        status = $9, moeda = $10
+      SET nome = $1, categoria = $2, descricao = $3, data_inicio = $4, 
+          local_nome = $5, imagem_capa = $6, cidade = $7, estado = $8, 
+          status = $9, moeda = $10
       WHERE id = $11
       RETURNING *
     `;
     
-    const values = [nome, categoria, descricao, data_inicio, local_nome, imagemFinal, cidade, estado, status, moeda, id];
     const result = await db.query(queryUpdate, values);
-    
-    return res.status(200).json({ message: "Atualizado com sucesso!", evento: result.rows[0] });
+    res.status(200).json({ message: "Atualizado!", evento: result.rows[0] });
 
   } catch (err) {
-    console.error("❌ ERRO NO UPDATE:", err);
-    return res.status(500).json({ error: "Erro interno no servidor" });
+    console.error("❌ ERRO NO UPDATE:", err.message);
+    return res.status(500).json({ error: err.message });
   }
 };
 
@@ -230,7 +238,10 @@ exports.excluirEvento = async (req, res) => {
     await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
     await db.query('DELETE FROM public.eventos WHERE id = $1', [id]);
     res.status(200).json({ message: "Excluído com sucesso" });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { 
+    console.error("❌ Erro ao excluir:", err.message);
+    res.status(500).json({ error: err.message }); 
+  }
 };
 
 // --- 7. SALVAR INGRESSOS ---
@@ -251,7 +262,10 @@ exports.salvarIngressos = async (req, res) => {
       await db.query('UPDATE public.eventos SET moeda = $1 WHERE id = $2', [moeda_evento, id]);
     }
     res.status(200).json({ message: "Ingressos salvos!" });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { 
+    console.error("❌ Erro ao salvar ingressos:", err.message);
+    res.status(500).json({ error: err.message }); 
+  }
 };
 
 // --- 8. ATUALIZAR STATUS ---
@@ -261,5 +275,8 @@ exports.atualizarStatus = async (req, res) => {
   try {
     await db.query('UPDATE public.eventos SET status = $1 WHERE id = $2', [status, id]);
     res.status(200).json({ message: "Status atualizado" });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { 
+    console.error("❌ Erro status:", err.message);
+    res.status(500).json({ error: err.message }); 
+  }
 };
