@@ -110,12 +110,13 @@ exports.criarEventoPresencial = async (req, res) => {
   let imagemFinal = null;
 
   if (req.file) {
+    // CORREÇÃO: Salva apenas o nome do arquivo (filename) ou a localização (S3)
     const arquivo = req.file.location || req.file.filename || req.file.path;
     if (arquivo && arquivo !== 'undefined') {
-        // Se já for uma URL (S3), usa direto. Se for local, anexa o domínio.
+        // Se for uma URL completa (S3/Cloud), mantém. Se for local, salva só o nome.
         imagemFinal = String(arquivo).startsWith('http') 
             ? arquivo 
-            : `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${arquivo}`;
+            : req.file.filename; 
     }
   }
 
@@ -152,7 +153,7 @@ exports.criarEventoPresencial = async (req, res) => {
   }
 };
 
-// --- 5. ATUALIZAR EVENTO (COM LÓGICA DE PERSISTÊNCIA DE IMAGEM) ---
+// --- 5. ATUALIZAR EVENTO ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
   try {
@@ -160,7 +161,7 @@ exports.atualizarEvento = async (req, res) => {
     if (check.rowCount === 0) return res.status(404).json({ error: "Evento não encontrado" });
     const atual = check.rows[0];
 
-    // Lógica de Imagem
+    // Lógica de Imagem Corrigida: Salva apenas o nome do arquivo
     let imagemFinal = atual.imagem_capa;
 
     if (req.file) {
@@ -168,8 +169,8 @@ exports.atualizarEvento = async (req, res) => {
       if (arquivo && arquivo !== 'undefined') {
           imagemFinal = String(arquivo).startsWith('http') 
             ? arquivo 
-            : `https://zmn9xuwd4y.us-east-1.awsapprunner.com/uploads/${arquivo}`;
-          console.log("📸 Nova imagem detectada:", imagemFinal);
+            : req.file.filename; 
+          console.log("📸 Nova imagem detectada (salvando nome):", imagemFinal);
       }
     } else {
       const imgBody = req.body.imagem_capa;
@@ -178,7 +179,12 @@ exports.atualizarEvento = async (req, res) => {
       if (isLixo) {
           imagemFinal = atual.imagem_capa; // Mantém a que já estava no banco
       } else {
-          imagemFinal = imgBody; // Usa a que veio do body (se for URL válida)
+          // Se for uma URL completa enviada pelo body, limpamos para manter apenas o nome se for do nosso domínio
+          if (typeof imgBody === 'string' && imgBody.includes('/uploads/')) {
+             imagemFinal = imgBody.split('/uploads/').pop();
+          } else {
+             imagemFinal = imgBody;
+          }
       }
     }
 

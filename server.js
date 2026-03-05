@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express'); 
 const cors = require('cors');
 const helmet = require('helmet');
+const path = require('path'); // ✅ ADICIONADO: Necessário para caminhos de arquivos
 
 // CAMINHOS DAS ROTAS
 const authRoutes = require('./src/routes/authRoutes');
@@ -41,9 +42,12 @@ app.post(
   pagamentoController.webhookStripe
 );
 
-// --- 3. PARSERS JSON ---
+// --- 3. PARSERS JSON E PASTA ESTÁTICA ---
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// ✅ ADICIONADO: Libera o acesso público às imagens da pasta uploads
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // --- 4. INICIALIZAÇÃO E SINCRONIZAÇÃO DO BANCO ---
 const inicializarBanco = async () => {
@@ -75,11 +79,21 @@ const inicializarBanco = async () => {
         produtor_email VARCHAR(255) REFERENCES public.produtores(email) ON DELETE CASCADE,
         nome VARCHAR(255) NOT NULL,
         status VARCHAR(50) DEFAULT 'Ativo',
-        data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        imagem_capa TEXT,
+        categoria VARCHAR(100),
+        descricao TEXT,
+        data_inicio DATE,
+        hora_inicio TIME,
+        local_nome VARCHAR(255),
+        cidade VARCHAR(100),
+        estado VARCHAR(50),
+        tipo VARCHAR(50),
+        moeda VARCHAR(10) DEFAULT 'BRL'
       );
     `);
 
-    // --- 2. MIGRAÇÕES STRIPE CONNECT (ESSENCIAL) ---
+    // --- 2. MIGRAÇÕES STRIPE CONNECT ---
     console.log('--- 💳 Sincronizando Colunas Stripe ---');
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS stripe_account_id VARCHAR(255)`);
     await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS stripe_account_id VARCHAR(255)`);
@@ -123,7 +137,6 @@ app.use((req, res, next) => {
 // --- 7. REGISTRO DAS ROTAS DA API ---
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
-  // AJUSTE: Mudei para SINGULAR para bater com o seu Front-end
 app.use('/api/pagamento', pagamentoRoutes); 
 app.use('/api/compras', compraRoutes);
 app.use('/api/comunidades', comunidadeRoutes); 
