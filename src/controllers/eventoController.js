@@ -107,15 +107,26 @@ exports.buscarEventoPorId = async (req, res) => {
   }
 };
 
-// --- 4. CRIAR EVENTO PRESENCIAL (CORRIGIDO PARA 22 COLUNAS) ---
+// --- 4. CRIAR EVENTO PRESENCIAL (CORRIGIDO: 22 COLUNAS + RESILIÊNCIA DE IMAGEM) ---
 exports.criarEventoPresencial = async (req, res) => {
   console.log("--- 🚀 INICIANDO CRIAÇÃO DE EVENTO ---");
   
   let imagemFinal = null;
+
+  // Prioridade 1: Arquivo via Multer/S3
   if (req.file) {
     imagemFinal = req.file.location || req.file.filename || req.file.path;
     if (imagemFinal && !String(imagemFinal).startsWith('http')) {
       imagemFinal = req.file.filename;
+    }
+  } 
+  
+  // Prioridade 2: Fallback caso a imagem venha como string no body (evita placeholder vazio)
+  if (!imagemFinal && req.body.imagem_capa) {
+    const imgBody = req.body.imagem_capa;
+    const isLixo = !imgBody || imgBody === "undefined" || imgBody === "null" || String(imgBody).includes("/undefined") || String(imgBody).includes("[object Object]");
+    if (!isLixo) {
+      imagemFinal = typeof imgBody === 'string' && imgBody.includes('/uploads/') ? imgBody.split('/uploads/').pop() : imgBody;
     }
   }
 
