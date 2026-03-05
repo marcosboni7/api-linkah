@@ -28,9 +28,9 @@ exports.criarSessaoCheckout = async (req, res) => {
             return res.status(400).json({ error: "Valor mínimo R$ 0,50." });
         }
 
-        // 2. CONFIGURAÇÃO DA SESSÃO (CORRIGIDO: FOCO APENAS EM CARTÃO)
+        // 2. CONFIGURAÇÃO DA SESSÃO
         const sessionParams = {
-            payment_method_types: ['card'], // ✅ REMOVIDO O PIX PARA EVITAR ERRO 500
+            payment_method_types: ['card'],
             customer_email: usuarioEmail,
             line_items: [{
                 price_data: {
@@ -61,7 +61,6 @@ exports.criarSessaoCheckout = async (req, res) => {
         if (ev.stripe_account_id) {
             const feePercent = 0.05; 
             sessionParams.payment_intent_data = {
-                // Application fee calculada sobre o total
                 application_fee_amount: Math.round(precoFinalEmCentavos * feePercent * parseInt(quantidade)),
                 transfer_data: { destination: ev.stripe_account_id },
             };
@@ -81,7 +80,6 @@ exports.vincularContaStripe = async (req, res) => {
     try {
         const { email } = req.body;
 
-        // 1. Criar a conta Express
         const account = await stripe.accounts.create({
             type: 'express',
             email: email,
@@ -92,11 +90,9 @@ exports.vincularContaStripe = async (req, res) => {
             business_type: 'individual',
         });
 
-        // 2. Salvar o account_id no banco
         await db.query("UPDATE public.produtores SET stripe_account_id = $1 WHERE email = $2", [account.id, email]);
         await db.query("UPDATE public.usuarios SET stripe_account_id = $1 WHERE email = $2", [account.id, email]);
 
-        // 3. Gerar link de onboarding
         const accountLink = await stripe.accountLinks.create({
             account: account.id,
             refresh_url: `${process.env.FRONTEND_URL}/dashboard/perfil`,
@@ -138,9 +134,10 @@ exports.webhookStripe = async (req, res) => {
     let event;
 
     try {
+        // Importante: req.body aqui deve ser o RAW body para validação de assinatura
         event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
     } catch (err) {
-        console.error("⚠️ Webhook signature verification failed.");
+        console.error("⚠️ Webhook signature verification failed:", err.message);
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
@@ -150,26 +147,41 @@ exports.webhookStripe = async (req, res) => {
             const meta = session.metadata;
 
             try {
-                // Salva a compra no Banco de Dados
-                await db.query(`
-                    INSERT INTO public.compras (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
-                    VALUES ($1, $2, $3, CURRENT_DATE, $4, $5, 'Aprovado', $6)
-                `, [meta.usuarioEmail, meta.eventoId, meta.tituloEvento, parseInt(meta.quantidade), session.amount_total / 100, session.id]);
+                // ✅ CORREÇÃO: Query agora com todos os 8 campos e 8 valores correspondentes
+                const query = `
+                    INSERT INTO public.compras 
+                    (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                `;
 
-                // Envia o ingresso por e-mail via serviço externo
+                const values = [
+                    meta.usuarioEmail,
+                    parseInt(meta.eventoId),
+                    meta.tituloEvento,
+                    new Date(), // Registra o momento da compra
+                    parseInt(meta.quantidade),
+                    session.amount_total / 100,
+                    'Aprovado',
+                    session.id
+                ];
+
+                await db.query(query, values);
+
+                // Envia o ingresso por e-mail (Sem travar o processamento do webhook)
                 const linkIngresso = `${process.env.FRONTEND_URL}/pagamento/sucesso?session_id=${session.id}`;
-                await enviarIngressoEmail(meta.usuarioEmail, { 
+                enviarIngressoEmail(meta.usuarioEmail, { 
                     tituloEvento: meta.tituloEvento, 
                     quantidade: meta.quantidade, 
                     linkIngresso, 
                     dataEvento: meta.dataEvento, 
                     horaEvento: meta.horaEvento, 
                     localEvento: meta.localEvento 
-                });
+                }).catch(e => console.error("📧 Erro ao enviar e-mail:", e.message));
 
-                console.log(`✅ Compra ${session.id} processada e e-mail enviado.`);
+                console.log(`✅ Compra ${session.id} processada com sucesso.`);
             } catch (err) {
-                console.error("❌ Erro ao processar webhook de compra:", err.message);
+                console.error("❌ Erro ao salvar compra no banco:", err.message);
+                // Retornamos 200 para o Stripe não ficar tentando reenviar um erro de banco
             }
             break;
 
@@ -195,6 +207,11 @@ exports.buscarDetalhesCompra = async (req, res) => {
              LEFT JOIN public.eventos e ON e.id = c.evento_id
              WHERE c.stripe_session_id = $1`, [sessionId]
         );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: "Compra não encontrada." });
+        }
+
         res.json(result.rows[0]);
     } catch (err) {
         res.status(500).json({ error: err.message });
