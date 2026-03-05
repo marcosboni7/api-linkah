@@ -8,7 +8,7 @@ exports.criarSessaoCheckout = async (req, res) => {
         const { evento, usuarioEmail, quantidade } = req.body;
         const baseUrl = process.env.FRONTEND_URL;
 
-        // 1. BUSCA DETALHES NO BANCO PARA GARANTIR SEGURANÇA
+        // 1. BUSCA DETALHES NO BANCO PARA GARANTIR SEGURANÇA (Evita manipulação de preço no Front)
         const dadosEventoBD = await db.query(
             "SELECT id, nome, data_inicio, hora_inicio, local_nome, stripe_account_id, preco FROM public.eventos WHERE id = $1",
             [evento.id]
@@ -19,6 +19,7 @@ exports.criarSessaoCheckout = async (req, res) => {
         }
 
         const ev = dadosEventoBD.rows[0];
+        // Prioriza o preço do banco de dados
         const precoUnitario = (ev.preco && Number(ev.preco) !== 0) ? Number(ev.preco) : Number(evento.preco);
         const precoFinalEmCentavos = Math.round(precoUnitario * 100);
 
@@ -26,11 +27,11 @@ exports.criarSessaoCheckout = async (req, res) => {
             return res.status(400).json({ error: "Valor mínimo R$ 0,50." });
         }
 
-        // 2. CONFIGURAÇÃO DA SESSÃO (AGORA COM PIX)
+        // 2. CONFIGURAÇÃO DA SESSÃO
         const sessionParams = {
-            payment_method_types: ['card', 'pix'], // ✅ PIX LIBERADO
+            payment_method_types: ['card', 'pix'], // ✅ PIX E CARTÃO
             payment_method_options: {
-                pix: { expires_after_seconds: 1800 }, // Expira em 30 min
+                pix: { expires_after_seconds: 1800 }, // QR Code expira em 30 min
             },
             customer_email: usuarioEmail,
             line_items: [{
@@ -62,7 +63,8 @@ exports.criarSessaoCheckout = async (req, res) => {
         if (ev.stripe_account_id) {
             const feePercent = 0.05; 
             sessionParams.payment_intent_data = {
-                application_fee_amount: Math.round(precoFinalEmCentavos * feePercent * quantidade),
+                // Application fee calculada sobre o total (preço unitário * quantidade)
+                application_fee_amount: Math.round(precoFinalEmCentavos * feePercent * parseInt(quantidade)),
                 transfer_data: { destination: ev.stripe_account_id },
             };
         }
@@ -92,7 +94,7 @@ exports.vincularContaStripe = async (req, res) => {
             business_type: 'individual',
         });
 
-        // 2. Salvar o account_id em ambas as tabelas para garantir
+        // 2. Salvar o account_id
         await db.query("UPDATE public.produtores SET stripe_account_id = $1 WHERE email = $2", [account.id, email]);
         await db.query("UPDATE public.usuarios SET stripe_account_id = $1 WHERE email = $2", [account.id, email]);
 
@@ -111,7 +113,7 @@ exports.vincularContaStripe = async (req, res) => {
     }
 };
 
-// --- 3. VERIFICAR STATUS DA CONTA (PARA O FRONTEND) ---
+// --- 3. VERIFICAR STATUS DA CONTA ---
 exports.verificarStatusStripe = async (req, res) => {
     try {
         const { email } = req.query;
@@ -132,7 +134,7 @@ exports.verificarStatusStripe = async (req, res) => {
     }
 };
 
-// --- 4. WEBHOOK (CONFIRMAR PAGAMENTOS E ATUALIZAR CONTAS) ---
+// --- 4. WEBHOOK (CONFIRMAR PAGAMENTOS) ---
 exports.webhookStripe = async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
@@ -140,37 +142,44 @@ exports.webhookStripe = async (req, res) => {
     try {
         event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
     } catch (err) {
+        console.error("⚠️ Webhook signature verification failed.");
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
     switch (event.type) {
-        // A) PAGAMENTO APROVADO (CARTÃO OU PIX)
         case 'checkout.session.completed':
             const session = event.data.object;
-            const { usuarioEmail, tituloEvento, quantidade, eventoId, dataEvento, horaEvento, localEvento } = session.metadata;
+            const meta = session.metadata;
 
             try {
+                // Salva a compra no Banco de Dados
                 await db.query(`
                     INSERT INTO public.compras (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
                     VALUES ($1, $2, $3, CURRENT_DATE, $4, $5, 'Aprovado', $6)
-                `, [usuarioEmail, eventoId, tituloEvento, parseInt(quantidade), session.amount_total / 100, session.id]);
+                `, [meta.usuarioEmail, meta.eventoId, meta.tituloEvento, parseInt(meta.quantidade), session.amount_total / 100, session.id]);
 
+                // Envia o ingresso por e-mail
                 const linkIngresso = `${process.env.FRONTEND_URL}/pagamento/sucesso?session_id=${session.id}`;
-                await enviarIngressoEmail(usuarioEmail, { 
-                    tituloEvento, quantidade, linkIngresso, dataEvento, horaEvento, localEvento 
+                await enviarIngressoEmail(meta.usuarioEmail, { 
+                    tituloEvento: meta.tituloEvento, 
+                    quantidade: meta.quantidade, 
+                    linkIngresso, 
+                    dataEvento: meta.dataEvento, 
+                    horaEvento: meta.horaEvento, 
+                    localEvento: meta.localEvento 
                 });
-                console.log(`✅ Ingresso enviado para: ${usuarioEmail}`);
+
+                console.log(`✅ Compra ${session.id} processada e e-mail enviado.`);
             } catch (err) {
-                console.error("❌ Erro ao salvar compra:", err.message);
+                console.error("❌ Erro ao processar webhook:", err.message);
             }
             break;
 
-        // B) CONTA DO PRODUTOR ATUALIZADA (FINALIZOU ONBOARDING)
         case 'account.updated':
             const account = event.data.object;
             if (account.details_submitted) {
                 await db.query("UPDATE public.produtores SET status = 'Ativo' WHERE stripe_account_id = $1", [account.id]);
-                console.log(`💳 Produtor Ativado no Stripe: ${account.id}`);
+                console.log(`💳 Conta Connect ${account.id} ativada.`);
             }
             break;
     }
