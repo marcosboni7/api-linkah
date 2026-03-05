@@ -2,7 +2,7 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const db = require('../config/database');
 const { enviarIngressoEmail } = require('../services/emailService');
 
-// --- 1. CRIAR SESSÃO DE CHECKOUT (CARTÃO + PIX COM SPLIT) ---
+// --- 1. CRIAR SESSÃO DE CHECKOUT (APENAS CARTÃO COM SPLIT) ---
 exports.criarSessaoCheckout = async (req, res) => {
     try {
         const { evento, usuarioEmail, quantidade } = req.body;
@@ -33,7 +33,7 @@ exports.criarSessaoCheckout = async (req, res) => {
 
         // 3. CONFIGURAÇÃO DOS PARÂMETROS DA SESSÃO
         const sessionParams = {
-            payment_method_types: ['card', 'pix'], // PIX LIBERADO!
+            payment_method_types: ['card'], // CONFIGURADO: APENAS CARTÃO DE CRÉDITO
             customer_email: usuarioEmail,
             line_items: [{
                 price_data: {
@@ -133,6 +133,7 @@ exports.webhookStripe = async (req, res) => {
         const { usuarioEmail, tituloEvento, quantidade, eventoId, dataEvento, horaEvento, localEvento } = session.metadata;
 
         try {
+            // Salva a compra como aprovada no banco de dados
             await db.query(`
                 INSERT INTO public.compras (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
                 VALUES ($1, $2, $3, CURRENT_DATE, $4, $5, 'Aprovado', $6)
@@ -143,7 +144,7 @@ exports.webhookStripe = async (req, res) => {
                 tituloEvento, quantidade, linkIngresso, dataEvento, horaEvento, localEvento 
             });
 
-            console.log(`✅ Pedido finalizado e e-mail enviado: ${usuarioEmail}`);
+            console.log(`✅ Pedido via Cartão finalizado e e-mail enviado: ${usuarioEmail}`);
         } catch (error) {
             console.error("❌ Erro ao processar sucesso do Webhook:", error.message);
         }
