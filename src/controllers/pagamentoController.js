@@ -101,20 +101,38 @@ exports.vincularContaStripe = async (req, res) => {
     }
 };
 
-// --- 3. VERIFICAR STATUS DA CONTA ---
+// --- 3. VERIFICAR STATUS DA CONTA (TURBINADO PARA O PERFIL) ---
 exports.verificarStatusStripe = async (req, res) => {
     try {
         const { email } = req.query;
         const result = await db.query("SELECT stripe_account_id FROM public.produtores WHERE email = $1", [email]);
-        if (!result.rows[0]?.stripe_account_id) return res.json({ conectado: false });
+        
+        if (!result.rows[0]?.stripe_account_id) {
+            return res.json({ conectado: false });
+        }
 
-        const account = await stripe.accounts.retrieve(result.rows[0].stripe_account_id);
+        const stripeAccountId = result.rows[0].stripe_account_id;
+
+        // BUSCA DADOS REAIS NO STRIPE
+        const account = await stripe.accounts.retrieve(stripeAccountId);
+        
+        // Se ele completou o onboarding, garantimos o status Ativo no banco
         if (account.details_submitted) {
             await db.query("UPDATE public.produtores SET status = 'Ativo' WHERE email = $1", [email]);
-            return res.json({ conectado: true, charges_enabled: account.charges_enabled });
         }
-        res.json({ conectado: false, status: 'pendente' });
+
+        // Retornamos um objeto completo para o frontend
+        return res.json({ 
+            conectado: true, 
+            status_banco: account.details_submitted ? 'Ativo' : 'Pendente',
+            charges_enabled: account.charges_enabled,   // Se pode vender
+            payouts_enabled: account.payouts_enabled,   // Se pode sacar
+            business_name: account.settings?.dashboard?.display_name || 'Conta Express',
+            details_submitted: account.details_submitted
+        });
+
     } catch (err) {
+        console.error("❌ Erro ao verificar status Stripe:", err.message);
         res.status(500).json({ error: err.message });
     }
 };
@@ -167,7 +185,6 @@ exports.buscarDetalhesCompra = async (req, res) => {
     try {
         const { sessionId } = req.params;
 
-        // 1. TENTA BUSCAR NO BANCO
         const result = await db.query(
             `SELECT c.*, e.hora_inicio as hora_evento, e.local_nome as local_evento
              FROM public.compras c
@@ -179,14 +196,12 @@ exports.buscarDetalhesCompra = async (req, res) => {
             return res.json(result.rows[0]);
         }
 
-        // 2. SE NÃO ACHOU, VERIFICA DIRETO NO STRIPE
         console.log(`🔍 Compra ${sessionId} não encontrada no banco. Verificando API Stripe...`);
         const session = await stripe.checkout.sessions.retrieve(sessionId);
 
         if (session.payment_status === 'paid') {
             const meta = session.metadata;
             
-            // 3. SALVA NO BANCO (PLANO B)
             const insertQuery = `
                 INSERT INTO public.compras 
                 (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
@@ -207,7 +222,6 @@ exports.buscarDetalhesCompra = async (req, res) => {
             const novaCompraResult = await db.query(insertQuery, insertValues);
             const compraSalva = novaCompraResult.rows[0];
 
-            // 4. DISPARA O E-MAIL TAMBÉM NO PLANO B (Caso o webhook tenha falhado)
             try {
                 await enviarIngressoEmail(meta.usuarioEmail, { 
                     tituloEvento: meta.tituloEvento, 
