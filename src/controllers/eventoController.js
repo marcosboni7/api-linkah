@@ -107,10 +107,9 @@ exports.buscarEventoPorId = async (req, res) => {
   }
 };
 
-// --- 4. CRIAR EVENTO PRESENCIAL ---
+// --- 4. CRIAR EVENTO PRESENCIAL (CORRIGIDO PARA 22 COLUNAS) ---
 exports.criarEventoPresencial = async (req, res) => {
   console.log("--- 🚀 INICIANDO CRIAÇÃO DE EVENTO ---");
-  console.log("📦 Body recebido:", req.body);
   
   let imagemFinal = null;
   if (req.file) {
@@ -118,7 +117,6 @@ exports.criarEventoPresencial = async (req, res) => {
     if (imagemFinal && !String(imagemFinal).startsWith('http')) {
       imagemFinal = req.file.filename;
     }
-    console.log("📸 Arquivo de imagem detectado:", imagemFinal);
   }
 
   const { 
@@ -135,9 +133,10 @@ exports.criarEventoPresencial = async (req, res) => {
         nome, produtor_email, categoria, descricao, data_inicio, 
         hora_inicio, data_termino, hora_termino, local_nome, 
         cep, endereco, numero, complemento, cidade, estado, 
-        capacidade, imagem_capa, tipo, status, moeda, regras, visibilidade
+        capacidade, imagem_capa, tipo, status, moeda, 
+        regras, visibilidade
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 'Ativo', $19, $20, $21)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
       RETURNING id
     `;
     
@@ -160,6 +159,7 @@ exports.criarEventoPresencial = async (req, res) => {
       parseInt(capacidade) || 0,
       imagemFinal, 
       tipo || 'Presencial',
+      'Ativo', 
       moeda || 'BRL',
       limparCampo(regras, ''),
       visibilidade || 'Publico'
@@ -178,7 +178,6 @@ exports.criarEventoPresencial = async (req, res) => {
 // --- 5. ATUALIZAR EVENTO ---
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
-  console.log(`--- 🔄 ATUALIZANDO EVENTO ID: ${id} ---`);
   
   try {
     const check = await db.query('SELECT * FROM public.eventos WHERE id = $1', [id]);
@@ -190,7 +189,6 @@ exports.atualizarEvento = async (req, res) => {
     if (req.file) {
       const arquivo = req.file.location || req.file.filename || req.file.path;
       imagemFinal = String(arquivo).startsWith('http') ? arquivo : req.file.filename;
-      console.log("📸 Nova imagem para atualização:", imagemFinal);
     } else if (req.body.imagem_capa) {
       const imgBody = req.body.imagem_capa;
       const isLixo = !imgBody || imgBody === "undefined" || imgBody === "null" || String(imgBody).includes("/undefined");
