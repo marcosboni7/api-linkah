@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express'); 
 const cors = require('cors');
 const helmet = require('helmet');
-const path = require('path'); // ✅ ADICIONADO: Necessário para caminhos de arquivos
+const path = require('path');
 
 // CAMINHOS DAS ROTAS
 const authRoutes = require('./src/routes/authRoutes');
@@ -35,9 +35,9 @@ app.use(helmet({
 }));
 
 // --- 2. ROTA DE WEBHOOK (STRIPE) ---
-// Deve vir ANTES do express.json() para não corromper a assinatura
+// ✅ CORRIGIDO: Alterado para plural (/pagamentos) para consistência
 app.post(
-  '/api/pagamento/webhook',
+  '/api/pagamentos/webhook',
   express.raw({ type: 'application/json' }),
   pagamentoController.webhookStripe
 );
@@ -46,7 +46,7 @@ app.post(
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// ✅ ADICIONADO: Libera o acesso público às imagens da pasta uploads
+// Libera o acesso público às imagens da pasta uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // --- 4. INICIALIZAÇÃO E SINCRONIZAÇÃO DO BANCO ---
@@ -137,7 +137,8 @@ app.use((req, res, next) => {
 // --- 7. REGISTRO DAS ROTAS DA API ---
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
-app.use('/api/pagamento', pagamentoRoutes); 
+// ✅ CORRIGIDO: Alterado para plural (/api/pagamentos) para bater com o Front-end
+app.use('/api/pagamentos', pagamentoRoutes); 
 app.use('/api/compras', compraRoutes);
 app.use('/api/comunidades', comunidadeRoutes); 
 app.use('/api/usuarios', routerUsuarios);
