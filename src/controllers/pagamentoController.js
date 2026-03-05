@@ -2,13 +2,13 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const db = require('../config/database');
 const { enviarIngressoEmail } = require('../services/emailService');
 
-// --- 1. CRIAR SESSÃO DE CHECKOUT (CARTÃO + PIX COM SPLIT) ---
+// --- 1. CRIAR SESSÃO DE CHECKOUT (APENAS CARTÃO COM SPLIT) ---
 exports.criarSessaoCheckout = async (req, res) => {
     try {
         const { evento, usuarioEmail, quantidade } = req.body;
         const baseUrl = process.env.FRONTEND_URL;
 
-        // 1. BUSCA DETALHES NO BANCO PARA GARANTIR SEGURANÇA (Evita manipulação de preço no Front)
+        // 1. BUSCA DETALHES NO BANCO PARA GARANTIR SEGURANÇA
         const dadosEventoBD = await db.query(
             "SELECT id, nome, data_inicio, hora_inicio, local_nome, stripe_account_id, preco FROM public.eventos WHERE id = $1",
             [evento.id]
@@ -19,7 +19,8 @@ exports.criarSessaoCheckout = async (req, res) => {
         }
 
         const ev = dadosEventoBD.rows[0];
-        // Prioriza o preço do banco de dados
+        
+        // Prioriza o preço do banco de dados para evitar fraudes no front
         const precoUnitario = (ev.preco && Number(ev.preco) !== 0) ? Number(ev.preco) : Number(evento.preco);
         const precoFinalEmCentavos = Math.round(precoUnitario * 100);
 
@@ -27,12 +28,9 @@ exports.criarSessaoCheckout = async (req, res) => {
             return res.status(400).json({ error: "Valor mínimo R$ 0,50." });
         }
 
-        // 2. CONFIGURAÇÃO DA SESSÃO
+        // 2. CONFIGURAÇÃO DA SESSÃO (CORRIGIDO: FOCO APENAS EM CARTÃO)
         const sessionParams = {
-            payment_method_types: ['card', 'pix'], // ✅ PIX E CARTÃO
-            payment_method_options: {
-                pix: { expires_after_seconds: 1800 }, // QR Code expira em 30 min
-            },
+            payment_method_types: ['card'], // ✅ REMOVIDO O PIX PARA EVITAR ERRO 500
             customer_email: usuarioEmail,
             line_items: [{
                 price_data: {
@@ -63,7 +61,7 @@ exports.criarSessaoCheckout = async (req, res) => {
         if (ev.stripe_account_id) {
             const feePercent = 0.05; 
             sessionParams.payment_intent_data = {
-                // Application fee calculada sobre o total (preço unitário * quantidade)
+                // Application fee calculada sobre o total
                 application_fee_amount: Math.round(precoFinalEmCentavos * feePercent * parseInt(quantidade)),
                 transfer_data: { destination: ev.stripe_account_id },
             };
@@ -94,7 +92,7 @@ exports.vincularContaStripe = async (req, res) => {
             business_type: 'individual',
         });
 
-        // 2. Salvar o account_id
+        // 2. Salvar o account_id no banco
         await db.query("UPDATE public.produtores SET stripe_account_id = $1 WHERE email = $2", [account.id, email]);
         await db.query("UPDATE public.usuarios SET stripe_account_id = $1 WHERE email = $2", [account.id, email]);
 
@@ -134,7 +132,7 @@ exports.verificarStatusStripe = async (req, res) => {
     }
 };
 
-// --- 4. WEBHOOK (CONFIRMAR PAGAMENTOS) ---
+// --- 4. WEBHOOK (CONFIRMAR PAGAMENTOS E ENVIAR INGRESSO) ---
 exports.webhookStripe = async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
@@ -158,7 +156,7 @@ exports.webhookStripe = async (req, res) => {
                     VALUES ($1, $2, $3, CURRENT_DATE, $4, $5, 'Aprovado', $6)
                 `, [meta.usuarioEmail, meta.eventoId, meta.tituloEvento, parseInt(meta.quantidade), session.amount_total / 100, session.id]);
 
-                // Envia o ingresso por e-mail
+                // Envia o ingresso por e-mail via serviço externo
                 const linkIngresso = `${process.env.FRONTEND_URL}/pagamento/sucesso?session_id=${session.id}`;
                 await enviarIngressoEmail(meta.usuarioEmail, { 
                     tituloEvento: meta.tituloEvento, 
@@ -171,7 +169,7 @@ exports.webhookStripe = async (req, res) => {
 
                 console.log(`✅ Compra ${session.id} processada e e-mail enviado.`);
             } catch (err) {
-                console.error("❌ Erro ao processar webhook:", err.message);
+                console.error("❌ Erro ao processar webhook de compra:", err.message);
             }
             break;
 
