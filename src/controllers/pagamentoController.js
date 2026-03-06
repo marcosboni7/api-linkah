@@ -8,7 +8,7 @@ exports.criarSessaoCheckout = async (req, res) => {
         const { evento, usuarioEmail, quantidade } = req.body;
         const baseUrl = process.env.FRONTEND_URL;
 
-        // AJUSTADO: JOIN usando produtor_email para buscar o ID da conta Stripe atualizado
+        // AJUSTADO: Usando e.produtor_email para o JOIN, conforme a estrutura do seu banco
         const dadosEventoBD = await db.query(
             `SELECT e.id, e.nome, e.data_inicio, e.hora_inicio, e.local_nome, e.preco, p.stripe_account_id 
              FROM public.eventos e
@@ -30,7 +30,7 @@ exports.criarSessaoCheckout = async (req, res) => {
         }
 
         const sessionParams = {
-            payment_method_types: ['card'], // APENAS CARTÃO HABILITADO
+            payment_method_types: ['card'],
             customer_email: usuarioEmail,
             line_items: [{
                 price_data: {
@@ -57,7 +57,7 @@ exports.criarSessaoCheckout = async (req, res) => {
             cancel_url: `${baseUrl}/venda?eventoId=${ev.id}&qtd=${quantidade}`,
         };
 
-        // LÓGICA DE SPLIT ATUALIZADA: 5% para plataforma, restante para o produtor
+        // LÓGICA DE SPLIT ATUALIZADA: Pega o ID da conta vindo do JOIN com a tabela produtores
         if (ev.stripe_account_id) {
             const feePercent = 0.05; // Sua comissão de 5%
             sessionParams.payment_intent_data = {
