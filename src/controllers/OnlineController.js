@@ -3,12 +3,12 @@ const db = require('../config/database');
 exports.criarEventoOnline = async (req, res) => {
     console.log("--- 🌐 Iniciando criação de Evento Online (Modo Base64) ---");
     
-    // Agora tudo vem do req.body, inclusive a imagem_capa
+    // Agora extraindo link_reuniao para bater com o banco de dados
     const { 
         produtor_email, 
         nome, 
         categoria, 
-        link_transmissao, 
+        link_reuniao, // <--- Ajustado aqui
         descricao, 
         data_inicio, 
         hora_inicio, 
@@ -16,14 +16,15 @@ exports.criarEventoOnline = async (req, res) => {
         hora_termino, 
         status, 
         tipo,
-        imagem_capa // O texto Base64 enviado pelo Front-end
+        imagem_capa 
     } = req.body;
 
-    // Log para conferir o que está chegando
+    // Logs para Debug no terminal da AWS
     console.log("Recebido nome:", nome);
+    console.log("Link da Reunião:", link_reuniao ? "Recebido ✅" : "Vazio ❌");
     console.log("Possui imagem?", imagem_capa ? "Sim (Base64)" : "Não");
 
-    // Validação
+    // Validação básica
     if (!produtor_email || !nome) {
         return res.status(400).json({ 
             error: "E-mail do produtor e nome do evento são obrigatórios." 
@@ -36,7 +37,7 @@ exports.criarEventoOnline = async (req, res) => {
                 produtor_email, 
                 nome, 
                 categoria, 
-                link_transmissao, 
+                link_reuniao, -- <--- Nome real da coluna no seu DB
                 descricao, 
                 data_inicio, 
                 hora_inicio, 
@@ -53,15 +54,15 @@ exports.criarEventoOnline = async (req, res) => {
             produtor_email, 
             nome, 
             categoria || 'Geral', 
-            link_transmissao, 
+            link_reuniao, // <--- Agora o valor correto entra aqui
             descricao || '', 
             data_inicio, 
             hora_inicio, 
             data_termino || null, 
             hora_termino || null, 
             status || 'Ativo', 
-            tipo || 'Online',
-            imagem_capa // Salvando o texto gigante diretamente na coluna TEXT
+            tipo || 'online', // Padronizado para minúsculo
+            imagem_capa 
         ];
 
         const result = await db.query(query, values);
