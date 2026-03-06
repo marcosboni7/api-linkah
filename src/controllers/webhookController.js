@@ -1,13 +1,12 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const db = require('../config/database'); 
-const { enviarIngressoEmail } = require('../services/emailService'); // Importação ajustada para o novo serviço
+const { enviarIngressoEmail } = require('../services/emailService');
 
 exports.ouvirStripe = async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
   try {
-    // Verifica a assinatura do Stripe para segurança
     event = stripe.webhooks.constructEvent(
       req.body, 
       sig, 
@@ -18,23 +17,20 @@ exports.ouvirStripe = async (req, res) => {
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  // Quando o pagamento for confirmado
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
-    
-    // Pegamos os dados salvos no metadata durante o checkout
     const { usuarioEmail, eventoId, quantidade } = session.metadata;
 
     console.log(`✅ Pagamento aprovado para: ${usuarioEmail}`);
     
     try {
       // 1. Registra a compra no PostgreSQL
-      const query = `
+      const queryCompra = `
         INSERT INTO public.compras (usuario_email, evento_id, quantidade, status, stripe_session_id)
         VALUES ($1, $2, $3, $4, $5)
       `;
 
-      await db.query(query, [
+      await db.query(queryCompra, [
         usuarioEmail,
         eventoId,
         parseInt(quantidade),
@@ -42,27 +38,43 @@ exports.ouvirStripe = async (req, res) => {
         session.id
       ]);
 
-      console.log('✨ Compra registrada no banco com sucesso!');
+      // 2. BUSCA DADOS DO EVENTO PARA O E-MAIL
+      // Aqui pegamos o link_reuniao e o tipo para diferenciar online/presencial
+      const queryEvento = `
+        SELECT nome, data, hora, local, tipo, link_reuniao 
+        FROM eventos 
+        WHERE id = $1
+      `;
+      const eventoRes = await db.query(queryEvento, [eventoId]);
+      const evento = eventoRes.rows[0];
 
-      // 2. Prepara o link e o conteúdo do e-mail
+      if (!evento) {
+        throw new Error('Evento não encontrado no banco de dados');
+      }
+
+      console.log('✨ Compra registrada e dados do evento recuperados!');
+
+      // 3. Prepara os dados para o e-mail
       const linkIngresso = `https://linkah-frontend-ivory.vercel.app/pagamento/sucesso?session_id=${session.id}`;
       
       const dadosParaEmail = {
-        tituloEvento: "Evento Linkah", // Você pode buscar o nome real no banco se quiser
+        tituloEvento: evento.nome,
+        dataEvento: evento.data ? new Date(evento.data).toLocaleDateString('pt-BR') : 'A confirmar',
+        horaEvento: evento.hora || 'A confirmar',
+        localEvento: evento.tipo === 'online' ? 'Evento Online' : (evento.local || 'A confirmar'),
         quantidade: quantidade,
-        linkIngresso: linkIngresso
+        linkIngresso: linkIngresso,
+        linkReuniao: evento.tipo === 'online' ? evento.link_reuniao : null,
+        tipo: evento.tipo
       };
 
-      // 3. Dispara o e-mail via Resend
-      // Usamos o await para garantir que o envio seja processado antes de responder ao Stripe
+      // 4. Dispara o e-mail via Resend
       await enviarIngressoEmail(usuarioEmail, dadosParaEmail);
 
     } catch (dbErr) {
       console.error('❌ Erro no processamento pós-pagamento:', dbErr.message);
-      // Aqui não damos return res.status(500) para o Stripe não ficar tentando reenviar o webhook infinitamente
     }
   }
 
-  // Responde ao Stripe que o evento foi recebido
   res.json({ received: true });
 };
