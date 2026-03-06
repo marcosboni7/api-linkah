@@ -32,20 +32,28 @@ app.use(helmet({
 }));
 
 // --- 2. ROTA DE WEBHOOK (STRIPE) ---
-// ✅ IMPORTANTE: Deve vir ANTES do express.json()
-// Suporta singular e plural para evitar erro de rota do Stripe
+// ✅ PROTEÇÃO CONTRA ERRO 'UNDEFINED': 
+// Essa lógica impede que o servidor caia se o nome da função no controller estiver errado.
 app.post(
   ['/api/pagamento/webhook', '/api/pagamentos/webhook'],
   express.raw({ type: 'application/json' }),
-  pagamentoController.ouvirStripe
+  (req, res) => {
+    // Tenta encontrar a função por qualquer um dos dois nomes comuns
+    const webhookHandler = pagamentoController.ouvirStripe || pagamentoController.webhookStripe;
+    
+    if (typeof webhookHandler === 'function') {
+      return webhookHandler(req, res);
+    } else {
+      console.error('❌ CRÍTICO: Função de Webhook não encontrada no pagamentoController!');
+      return res.status(500).send('Webhook handler not configured');
+    }
+  }
 );
 
 // --- 3. PARSERS JSON E PASTA ESTÁTICA ---
-// Ocupam 50mb para suportar upload de imagens pesadas
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Libera o acesso público às imagens
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // --- 4. INICIALIZAÇÃO E SINCRONIZAÇÃO DO BANCO (MIGRAÇÕES) ---
@@ -54,7 +62,7 @@ const inicializarBanco = async () => {
     console.log('--- 🔄 Iniciando Conexão com o Banco ---');
     await db.query('SELECT NOW()');
     
-    // 1. Criar Tabelas Base
+    // 1. Criar Tabelas Base (Garante que o essencial exista)
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.usuarios (
         id SERIAL PRIMARY KEY,
@@ -79,8 +87,7 @@ const inicializarBanco = async () => {
         id SERIAL PRIMARY KEY,
         produtor_email VARCHAR(255) REFERENCES public.produtores(email) ON DELETE CASCADE,
         nome VARCHAR(255) NOT NULL,
-        status VARCHAR(50) DEFAULT 'Ativo',
-        data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        status VARCHAR(50) DEFAULT 'Ativo'
       );
 
       CREATE TABLE IF NOT EXISTS public.compras (
@@ -95,8 +102,7 @@ const inicializarBanco = async () => {
 
     console.log('--- 💳 Sincronizando Migrações e Ajustes de Coluna ---');
     
-    // Ajustes de Eventos (Onde estava dando erro)
-    await db.query(`ALTER TABLE public.eventos ALTER COLUMN estado TYPE VARCHAR(100)`);
+    // Correções de Eventos (Campos para Link de Live e Stripe)
     await db.query(`ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS link_reuniao TEXT`);
     await db.query(`ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS tipo VARCHAR(50)`);
     await db.query(`ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS preco DECIMAL(10,2) DEFAULT 0`);
@@ -110,11 +116,11 @@ const inicializarBanco = async () => {
     await db.query(`ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS estado VARCHAR(100)`);
     await db.query(`ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS stripe_account_id VARCHAR(255)`);
 
-    // Ajustes de Compras
+    // Correções de Compras
     await db.query(`ALTER TABLE public.compras ADD COLUMN IF NOT EXISTS valor_total DECIMAL(10,2)`);
     await db.query(`ALTER TABLE public.compras ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255)`);
 
-    // Ajustes de Produtores e Usuários
+    // Correções de Usuários e Produtores
     await db.query(`ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS stripe_account_id VARCHAR(255)`);
     await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS stripe_account_id VARCHAR(255)`);
     await db.query(`ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS cpf_cnpj VARCHAR(20)`);
@@ -129,26 +135,26 @@ const inicializarBanco = async () => {
   }
 };
 
-// --- 5. MONITORAMENTO DE REQUISIÇÕES ---
+// --- 5. MONITORAMENTO ---
 app.use((req, res, next) => {
   console.log(`📡 [${new Date().toISOString()}] ${req.method} ${req.url}`);
   next();
 });
 
-// --- 6. REGISTRO DAS ROTAS DA API ---
+// --- 6. REGISTRO DAS ROTAS ---
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 app.use('/api/pagamento', pagamentoRoutes);
 app.use('/api/compras', compraRoutes);
 app.use('/api/comunidades', comunidadeRoutes); 
 
-// Rota para o Painel Staff (União de usuários e produtores)
+// Painel Staff
 app.use('/api/usuarios', async (req, res) => {
   try {
     const query = `
-      SELECT nome, email, role, status, data_criacao as created_at, stripe_account_id FROM public.produtores
+      SELECT nome, email, role, status, data_criacao as created_at FROM public.produtores
       UNION ALL
-      SELECT nome, email, role, status, created_at, stripe_account_id FROM public.usuarios
+      SELECT nome, email, role, status, created_at FROM public.usuarios
       ORDER BY created_at DESC
     `;
     const result = await db.query(query);
@@ -160,7 +166,7 @@ app.use('/api/usuarios', async (req, res) => {
 
 app.get('/ping', (req, res) => res.status(200).json({ status: 'Linkah API Online', timestamp: new Date() }));
 
-// --- 7. START DO SERVIDOR ---
+// --- 7. START ---
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 Linkah API voando na porta: ${PORT}`);
