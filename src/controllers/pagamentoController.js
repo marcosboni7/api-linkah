@@ -53,11 +53,15 @@ exports.criarSessaoCheckout = async (req, res) => {
             cancel_url: `${baseUrl}/venda?eventoId=${ev.id}&qtd=${quantidade}`,
         };
 
+        // LÓGICA DE SPLIT: 5% para a plataforma, restante para o produtor
         if (ev.stripe_account_id) {
-            const feePercent = 0.05; 
+            const feePercent = 0.05; // Sua comissão de 5%
             sessionParams.payment_intent_data = {
+                // O valor da taxa que FICA com você (plataforma)
                 application_fee_amount: Math.round(precoFinalEmCentavos * feePercent * parseInt(quantidade)),
-                transfer_data: { destination: ev.stripe_account_id },
+                transfer_data: { 
+                    destination: ev.stripe_account_id 
+                },
             };
         }
 
@@ -124,7 +128,7 @@ exports.verificarStatusStripe = async (req, res) => {
             charges_enabled: account.charges_enabled,
             payouts_enabled: account.payouts_enabled,
             business_name: account.settings?.dashboard?.display_name || 'Conta Vinculada',
-            email_stripe: account.email || email, // AQUI GARANTE QUE O EMAIL VAI PARA O FRONT
+            email_stripe: account.email || email, // GARANTE O EMAIL PARA O FRONTEND
             details_submitted: account.details_submitted
         });
 
@@ -240,6 +244,7 @@ exports.buscarDetalhesCompra = async (req, res) => {
     }
 };
 
+// --- 6. LISTAR INGRESSOS ---
 exports.listarMeusIngressos = async (req, res) => {
     try {
         const { email } = req.query;
