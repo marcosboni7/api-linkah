@@ -8,12 +8,11 @@ exports.criarSessaoCheckout = async (req, res) => {
         const { evento, usuarioEmail, quantidade } = req.body;
         const baseUrl = process.env.FRONTEND_URL;
 
-        // MUDANÇA AQUI: Buscamos o stripe_account_id do produtor (dono do evento)
-        // Isso garante que se ele configurar o Stripe DEPOIS de criar o evento, funcione.
+        // AJUSTADO: JOIN usando produtor_email para buscar o ID da conta Stripe atualizado
         const dadosEventoBD = await db.query(
             `SELECT e.id, e.nome, e.data_inicio, e.hora_inicio, e.local_nome, e.preco, p.stripe_account_id 
              FROM public.eventos e
-             JOIN public.produtores p ON e.produtor_id = p.id 
+             JOIN public.produtores p ON e.produtor_email = p.email 
              WHERE e.id = $1`,
             [evento.id]
         );
@@ -31,7 +30,7 @@ exports.criarSessaoCheckout = async (req, res) => {
         }
 
         const sessionParams = {
-            payment_method_types: ['card'],
+            payment_method_types: ['card'], // APENAS CARTÃO HABILITADO
             customer_email: usuarioEmail,
             line_items: [{
                 price_data: {
@@ -49,7 +48,7 @@ exports.criarSessaoCheckout = async (req, res) => {
                 usuarioEmail,
                 eventoId: ev.id.toString(),
                 tituloEvento: ev.nome,
-                quantidade: quantity.toString(),
+                quantidade: quantidade.toString(),
                 dataEvento: ev.data_inicio ? new Date(ev.data_inicio).toLocaleDateString('pt-BR') : 'A confirmar',
                 horaEvento: ev.hora_inicio || 'A confirmar',
                 localEvento: ev.local_nome || 'Local a definir'
@@ -58,9 +57,9 @@ exports.criarSessaoCheckout = async (req, res) => {
             cancel_url: `${baseUrl}/venda?eventoId=${ev.id}&qtd=${quantidade}`,
         };
 
-        // LÓGICA DE SPLIT ATUALIZADA
+        // LÓGICA DE SPLIT ATUALIZADA: 5% para plataforma, restante para o produtor
         if (ev.stripe_account_id) {
-            const feePercent = 0.05; // 5% plataforma
+            const feePercent = 0.05; // Sua comissão de 5%
             sessionParams.payment_intent_data = {
                 application_fee_amount: Math.round(precoFinalEmCentavos * feePercent * parseInt(quantidade)),
                 transfer_data: { 
