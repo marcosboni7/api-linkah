@@ -51,7 +51,7 @@ exports.criarSessaoCheckout = async (req, res) => {
                 dataEvento: ev.data_inicio ? new Date(ev.data_inicio).toLocaleDateString('pt-BR') : 'A confirmar',
                 horaEvento: ev.hora_inicio || 'A confirmar',
                 localEvento: ev.tipo === 'online' ? 'Evento Online' : (ev.local_nome || 'Local a definir'),
-                linkReuniao: ev.link_reuniao || '' // Adicionado no metadata para segurança
+                linkReuniao: ev.link_reuniao || '' 
             },
             success_url: `${baseUrl}/pagamento/sucesso?session_id={CHECKOUT_SESSION_ID}`,
             cancel_url: `${baseUrl}/venda?eventoId=${ev.id}&qtd=${quantidade}`,
@@ -136,7 +136,7 @@ exports.verificarStatusStripe = async (req, res) => {
     }
 };
 
-// --- 4. WEBHOOK (CORRIGIDO PARA ENVIAR LINK) ---
+// --- 4. WEBHOOK (CORRIGIDO PARA EVITAR ERROS DE TIPO E GARANTIR EMAIL) ---
 exports.webhookStripe = async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
@@ -154,24 +154,34 @@ exports.webhookStripe = async (req, res) => {
         try {
             const existe = await db.query("SELECT id FROM public.compras WHERE stripe_session_id = $1", [session.id]);
             if (existe.rows.length === 0) {
-                // Buscamos o link direto do banco para garantir
-                const evResult = await db.query("SELECT link_reuniao, tipo FROM public.eventos WHERE id = $1", [meta.eventoId]);
+                // Buscamos o link direto do banco usando parseInt para o ID
+                const idEvento = parseInt(meta.eventoId);
+                const evResult = await db.query("SELECT nome, link_reuniao, tipo FROM public.eventos WHERE id = $1", [idEvento]);
                 const evData = evResult.rows[0];
 
                 await db.query(`
                     INSERT INTO public.compras 
                     (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
                     VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7)
-                `, [meta.usuarioEmail, parseInt(meta.eventoId), meta.tituloEvento, new Date(), parseInt(meta.quantidade), session.amount_total / 100, session.id]);
+                `, [
+                    meta.usuarioEmail, 
+                    idEvento, 
+                    evData?.nome || meta.tituloEvento, 
+                    new Date(), 
+                    parseInt(meta.quantidade), 
+                    session.amount_total / 100, 
+                    session.id
+                ]);
 
+                console.log(`📧 Enviando e-mail para: ${meta.usuarioEmail}`);
                 await enviarIngressoEmail(meta.usuarioEmail, { 
-                    tituloEvento: meta.tituloEvento, 
+                    tituloEvento: evData?.nome || meta.tituloEvento, 
                     quantidade: meta.quantidade, 
                     linkIngresso: `${process.env.FRONTEND_URL}/pagamento/sucesso?session_id=${session.id}`, 
                     dataEvento: meta.dataEvento, 
                     horaEvento: meta.horaEvento, 
                     localEvento: meta.localEvento,
-                    linkReuniao: evData?.link_reuniao || '', // LINK ENVIADO PARA O EMAIL
+                    linkReuniao: evData?.link_reuniao || '', 
                     tipo: evData?.tipo
                 });
             }
@@ -182,12 +192,11 @@ exports.webhookStripe = async (req, res) => {
     res.json({ received: true });
 };
 
-// --- 5. BUSCAR DETALHES (CORRIGIDO PARA O FRONTEND) ---
+// --- 5. BUSCAR DETALHES (CORRIGIDO PARA O FRONTEND E RECUPERAÇÃO) ---
 exports.buscarDetalhesCompra = async (req, res) => {
     try {
         const { sessionId } = req.params;
 
-        // JOIN alterado para buscar o link_reuniao da tabela eventos
         const result = await db.query(
             `SELECT c.*, e.hora_inicio as hora_evento, e.local_nome as local_evento, e.link_reuniao, e.tipo
              FROM public.compras c
@@ -199,14 +208,13 @@ exports.buscarDetalhesCompra = async (req, res) => {
             return res.json(result.rows[0]);
         }
 
-        // Recuperação ativa caso o webhook atrase
         const session = await stripe.checkout.sessions.retrieve(sessionId);
 
         if (session.payment_status === 'paid') {
             const meta = session.metadata;
+            const idEvento = parseInt(meta.eventoId);
             
-            // Busca o link_reuniao do evento
-            const evResult = await db.query("SELECT link_reuniao, tipo FROM public.eventos WHERE id = $1", [meta.eventoId]);
+            const evResult = await db.query("SELECT nome, link_reuniao, tipo FROM public.eventos WHERE id = $1", [idEvento]);
             const evData = evResult.rows[0];
 
             const insertQuery = `
@@ -218,8 +226,8 @@ exports.buscarDetalhesCompra = async (req, res) => {
 
             const insertValues = [
                 meta.usuarioEmail,
-                parseInt(meta.eventoId),
-                meta.tituloEvento,
+                idEvento,
+                evData?.nome || meta.tituloEvento,
                 new Date(),
                 parseInt(meta.quantidade),
                 session.amount_total / 100,
@@ -228,14 +236,11 @@ exports.buscarDetalhesCompra = async (req, res) => {
 
             const novaCompraResult = await db.query(insertQuery, insertValues);
             
-            // Monta objeto de resposta com link para o front
-            const compraFinal = {
+            return res.json({
                 ...novaCompraResult.rows[0],
                 link_reuniao: evData?.link_reuniao,
                 tipo: evData?.tipo
-            };
-
-            return res.json(compraFinal);
+            });
         }
 
         res.status(404).json({ error: "Compra não processada." });
