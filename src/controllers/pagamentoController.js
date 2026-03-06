@@ -8,13 +8,18 @@ exports.criarSessaoCheckout = async (req, res) => {
         const { evento, usuarioEmail, quantidade } = req.body;
         const baseUrl = process.env.FRONTEND_URL;
 
+        // MUDANÇA AQUI: Buscamos o stripe_account_id do produtor (dono do evento)
+        // Isso garante que se ele configurar o Stripe DEPOIS de criar o evento, funcione.
         const dadosEventoBD = await db.query(
-            "SELECT id, nome, data_inicio, hora_inicio, local_nome, stripe_account_id, preco FROM public.eventos WHERE id = $1",
+            `SELECT e.id, e.nome, e.data_inicio, e.hora_inicio, e.local_nome, e.preco, p.stripe_account_id 
+             FROM public.eventos e
+             JOIN public.produtores p ON e.produtor_id = p.id 
+             WHERE e.id = $1`,
             [evento.id]
         );
 
         if (dadosEventoBD.rows.length === 0) {
-            return res.status(404).json({ error: "Evento não encontrado." });
+            return res.status(404).json({ error: "Evento não encontrado ou produtor não vinculado." });
         }
 
         const ev = dadosEventoBD.rows[0];
@@ -26,7 +31,7 @@ exports.criarSessaoCheckout = async (req, res) => {
         }
 
         const sessionParams = {
-            payment_method_types: ['card'], // APENAS CARTÃO HABILITADO
+            payment_method_types: ['card'],
             customer_email: usuarioEmail,
             line_items: [{
                 price_data: {
@@ -44,7 +49,7 @@ exports.criarSessaoCheckout = async (req, res) => {
                 usuarioEmail,
                 eventoId: ev.id.toString(),
                 tituloEvento: ev.nome,
-                quantidade: quantidade.toString(),
+                quantidade: quantity.toString(),
                 dataEvento: ev.data_inicio ? new Date(ev.data_inicio).toLocaleDateString('pt-BR') : 'A confirmar',
                 horaEvento: ev.hora_inicio || 'A confirmar',
                 localEvento: ev.local_nome || 'Local a definir'
@@ -53,11 +58,10 @@ exports.criarSessaoCheckout = async (req, res) => {
             cancel_url: `${baseUrl}/venda?eventoId=${ev.id}&qtd=${quantidade}`,
         };
 
-        // LÓGICA DE SPLIT: 5% para a plataforma, restante para o produtor
+        // LÓGICA DE SPLIT ATUALIZADA
         if (ev.stripe_account_id) {
-            const feePercent = 0.05; // Sua comissão de 5%
+            const feePercent = 0.05; // 5% plataforma
             sessionParams.payment_intent_data = {
-                // O valor da taxa que FICA com você (plataforma)
                 application_fee_amount: Math.round(precoFinalEmCentavos * feePercent * parseInt(quantidade)),
                 transfer_data: { 
                     destination: ev.stripe_account_id 
@@ -128,7 +132,7 @@ exports.verificarStatusStripe = async (req, res) => {
             charges_enabled: account.charges_enabled,
             payouts_enabled: account.payouts_enabled,
             business_name: account.settings?.dashboard?.display_name || 'Conta Vinculada',
-            email_stripe: account.email || email, // GARANTE O EMAIL PARA O FRONTEND
+            email_stripe: account.email || email, 
             details_submitted: account.details_submitted
         });
 
