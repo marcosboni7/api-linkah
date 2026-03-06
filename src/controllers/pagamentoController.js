@@ -2,7 +2,7 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const db = require('../config/database');
 const { enviarIngressoEmail } = require('../services/emailService');
 
-// --- 1. CRIAR SESSÃO DE CHECKOUT ---
+// --- 1. CRIAR SESSÃO DE CHECKOUT (SOMENTE CARTÃO) ---
 exports.criarSessaoCheckout = async (req, res) => {
     try {
         const { evento, usuarioEmail, quantidade } = req.body;
@@ -26,7 +26,7 @@ exports.criarSessaoCheckout = async (req, res) => {
         }
 
         const sessionParams = {
-            payment_method_types: ['card'],
+            payment_method_types: ['card'], // APENAS CARTÃO HABILITADO
             customer_email: usuarioEmail,
             line_items: [{
                 price_data: {
@@ -101,7 +101,7 @@ exports.vincularContaStripe = async (req, res) => {
     }
 };
 
-// --- 3. VERIFICAR STATUS DA CONTA ---
+// --- 3. VERIFICAR STATUS DA CONTA (COM E-MAIL PARA O PERFIL) ---
 exports.verificarStatusStripe = async (req, res) => {
     try {
         const { email } = req.query;
@@ -123,8 +123,8 @@ exports.verificarStatusStripe = async (req, res) => {
             status_banco: account.details_submitted ? 'Ativo' : 'Pendente',
             charges_enabled: account.charges_enabled,
             payouts_enabled: account.payouts_enabled,
-            business_name: account.settings?.dashboard?.display_name || 'Conta Express',
-            email_stripe: account.email, // <--- NOVO: Retornando o email do Stripe
+            business_name: account.settings?.dashboard?.display_name || 'Conta Vinculada',
+            email_stripe: account.email || email, // AQUI GARANTE QUE O EMAIL VAI PARA O FRONT
             details_submitted: account.details_submitted
         });
 
@@ -167,7 +167,6 @@ exports.webhookStripe = async (req, res) => {
                     horaEvento: meta.horaEvento, 
                     localEvento: meta.localEvento 
                 });
-                console.log("✅ E-mail enviado via Webhook");
             }
         } catch (err) {
             console.error("❌ Erro no banco/email (Webhook):", err.message);
@@ -180,6 +179,7 @@ exports.webhookStripe = async (req, res) => {
 exports.buscarDetalhesCompra = async (req, res) => {
     try {
         const { sessionId } = req.params;
+
         const result = await db.query(
             `SELECT c.*, e.hora_inicio as hora_evento, e.local_nome as local_evento
              FROM public.compras c
@@ -187,20 +187,35 @@ exports.buscarDetalhesCompra = async (req, res) => {
              WHERE c.stripe_session_id = $1`, [sessionId]
         );
 
-        if (result.rows.length > 0) return res.json(result.rows[0]);
+        if (result.rows.length > 0) {
+            return res.json(result.rows[0]);
+        }
 
         const session = await stripe.checkout.sessions.retrieve(sessionId);
 
         if (session.payment_status === 'paid') {
             const meta = session.metadata;
+            
             const insertQuery = `
                 INSERT INTO public.compras 
                 (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
                 VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7)
                 RETURNING *
             `;
-            const novaCompraResult = await db.query(insertQuery, [meta.usuarioEmail, parseInt(meta.eventoId), meta.tituloEvento, new Date(), parseInt(meta.quantidade), session.amount_total / 100, session.id]);
-            
+
+            const insertValues = [
+                meta.usuarioEmail,
+                parseInt(meta.eventoId),
+                meta.tituloEvento,
+                new Date(),
+                parseInt(meta.quantidade),
+                session.amount_total / 100,
+                session.id
+            ];
+
+            const novaCompraResult = await db.query(insertQuery, insertValues);
+            const compraSalva = novaCompraResult.rows[0];
+
             try {
                 await enviarIngressoEmail(meta.usuarioEmail, { 
                     tituloEvento: meta.tituloEvento, 
@@ -210,18 +225,30 @@ exports.buscarDetalhesCompra = async (req, res) => {
                     horaEvento: meta.horaEvento, 
                     localEvento: meta.localEvento 
                 });
-            } catch (e) { console.error("📧 Erro email recuperação:", e.message); }
+            } catch (e) {
+                console.error("📧 Erro e-mail:", e.message);
+            }
 
-            return res.json(novaCompraResult.rows[0]);
+            return res.json(compraSalva);
         }
-        res.status(404).json({ error: "Compra não processada." });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+
+        res.status(404).json({ error: "Compra não processada ainda." });
+
+    } catch (err) {
+        console.error("❌ Erro ao buscar detalhes:", err.message);
+        res.status(500).json({ error: err.message });
+    }
 };
 
 exports.listarMeusIngressos = async (req, res) => {
     try {
         const { email } = req.query;
-        const result = await db.query("SELECT *, TO_CHAR(data_evento, 'DD/MM/YYYY') as data FROM public.compras WHERE usuario_email = $1 ORDER BY id DESC", [email]);
+        const result = await db.query(
+            "SELECT *, TO_CHAR(data_evento, 'DD/MM/YYYY') as data FROM public.compras WHERE usuario_email = $1 ORDER BY id DESC", 
+            [email]
+        );
         res.json(result.rows);
-    } catch (err) { res.status(500).json({ error: "Erro ingressos." }); }
+    } catch (err) {
+        res.status(500).json({ error: "Erro ao buscar ingressos." });
+    }
 };
