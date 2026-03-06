@@ -2,15 +2,14 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const db = require('../config/database');
 const { enviarIngressoEmail } = require('../services/emailService');
 
-// --- 1. CRIAR SESSÃO DE CHECKOUT (SOMENTE CARTÃO) ---
+// --- 1. CRIAR SESSÃO DE CHECKOUT ---
 exports.criarSessaoCheckout = async (req, res) => {
     try {
         const { evento, usuarioEmail, quantidade } = req.body;
         const baseUrl = process.env.FRONTEND_URL;
 
-        // AJUSTADO: Usando e.produtor_email para o JOIN, conforme a estrutura do seu banco
         const dadosEventoBD = await db.query(
-            `SELECT e.id, e.nome, e.data_inicio, e.hora_inicio, e.local_nome, e.preco, p.stripe_account_id 
+            `SELECT e.id, e.nome, e.data_inicio, e.hora_inicio, e.local_nome, e.preco, e.tipo, e.link_reuniao, p.stripe_account_id 
              FROM public.eventos e
              JOIN public.produtores p ON e.produtor_email = p.email 
              WHERE e.id = $1`,
@@ -51,20 +50,18 @@ exports.criarSessaoCheckout = async (req, res) => {
                 quantidade: quantidade.toString(),
                 dataEvento: ev.data_inicio ? new Date(ev.data_inicio).toLocaleDateString('pt-BR') : 'A confirmar',
                 horaEvento: ev.hora_inicio || 'A confirmar',
-                localEvento: ev.local_nome || 'Local a definir'
+                localEvento: ev.tipo === 'online' ? 'Evento Online' : (ev.local_nome || 'Local a definir'),
+                linkReuniao: ev.link_reuniao || '' // Adicionado no metadata para segurança
             },
             success_url: `${baseUrl}/pagamento/sucesso?session_id={CHECKOUT_SESSION_ID}`,
             cancel_url: `${baseUrl}/venda?eventoId=${ev.id}&qtd=${quantidade}`,
         };
 
-        // LÓGICA DE SPLIT ATUALIZADA: Pega o ID da conta vindo do JOIN com a tabela produtores
         if (ev.stripe_account_id) {
-            const feePercent = 0.05; // Sua comissão de 5%
+            const feePercent = 0.05; 
             sessionParams.payment_intent_data = {
                 application_fee_amount: Math.round(precoFinalEmCentavos * feePercent * parseInt(quantidade)),
-                transfer_data: { 
-                    destination: ev.stripe_account_id 
-                },
+                transfer_data: { destination: ev.stripe_account_id },
             };
         }
 
@@ -108,7 +105,7 @@ exports.vincularContaStripe = async (req, res) => {
     }
 };
 
-// --- 3. VERIFICAR STATUS DA CONTA (COM E-MAIL PARA O PERFIL) ---
+// --- 3. VERIFICAR STATUS DA CONTA ---
 exports.verificarStatusStripe = async (req, res) => {
     try {
         const { email } = req.query;
@@ -130,8 +127,6 @@ exports.verificarStatusStripe = async (req, res) => {
             status_banco: account.details_submitted ? 'Ativo' : 'Pendente',
             charges_enabled: account.charges_enabled,
             payouts_enabled: account.payouts_enabled,
-            business_name: account.settings?.dashboard?.display_name || 'Conta Vinculada',
-            email_stripe: account.email || email, 
             details_submitted: account.details_submitted
         });
 
@@ -141,7 +136,7 @@ exports.verificarStatusStripe = async (req, res) => {
     }
 };
 
-// --- 4. WEBHOOK ---
+// --- 4. WEBHOOK (CORRIGIDO PARA ENVIAR LINK) ---
 exports.webhookStripe = async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
@@ -149,7 +144,6 @@ exports.webhookStripe = async (req, res) => {
     try {
         event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
     } catch (err) {
-        console.error("⚠️ Webhook signature failed:", err.message);
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
@@ -160,6 +154,10 @@ exports.webhookStripe = async (req, res) => {
         try {
             const existe = await db.query("SELECT id FROM public.compras WHERE stripe_session_id = $1", [session.id]);
             if (existe.rows.length === 0) {
+                // Buscamos o link direto do banco para garantir
+                const evResult = await db.query("SELECT link_reuniao, tipo FROM public.eventos WHERE id = $1", [meta.eventoId]);
+                const evData = evResult.rows[0];
+
                 await db.query(`
                     INSERT INTO public.compras 
                     (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
@@ -172,23 +170,26 @@ exports.webhookStripe = async (req, res) => {
                     linkIngresso: `${process.env.FRONTEND_URL}/pagamento/sucesso?session_id=${session.id}`, 
                     dataEvento: meta.dataEvento, 
                     horaEvento: meta.horaEvento, 
-                    localEvento: meta.localEvento 
+                    localEvento: meta.localEvento,
+                    linkReuniao: evData?.link_reuniao || '', // LINK ENVIADO PARA O EMAIL
+                    tipo: evData?.tipo
                 });
             }
         } catch (err) {
-            console.error("❌ Erro no banco/email (Webhook):", err.message);
+            console.error("❌ Erro no Webhook:", err.message);
         }
     }
     res.json({ received: true });
 };
 
-// --- 5. CONSULTA E RECUPERAÇÃO ATIVA ---
+// --- 5. BUSCAR DETALHES (CORRIGIDO PARA O FRONTEND) ---
 exports.buscarDetalhesCompra = async (req, res) => {
     try {
         const { sessionId } = req.params;
 
+        // JOIN alterado para buscar o link_reuniao da tabela eventos
         const result = await db.query(
-            `SELECT c.*, e.hora_inicio as hora_evento, e.local_nome as local_evento
+            `SELECT c.*, e.hora_inicio as hora_evento, e.local_nome as local_evento, e.link_reuniao, e.tipo
              FROM public.compras c
              LEFT JOIN public.eventos e ON e.id = c.evento_id
              WHERE c.stripe_session_id = $1`, [sessionId]
@@ -198,11 +199,16 @@ exports.buscarDetalhesCompra = async (req, res) => {
             return res.json(result.rows[0]);
         }
 
+        // Recuperação ativa caso o webhook atrase
         const session = await stripe.checkout.sessions.retrieve(sessionId);
 
         if (session.payment_status === 'paid') {
             const meta = session.metadata;
             
+            // Busca o link_reuniao do evento
+            const evResult = await db.query("SELECT link_reuniao, tipo FROM public.eventos WHERE id = $1", [meta.eventoId]);
+            const evData = evResult.rows[0];
+
             const insertQuery = `
                 INSERT INTO public.compras 
                 (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
@@ -221,28 +227,21 @@ exports.buscarDetalhesCompra = async (req, res) => {
             ];
 
             const novaCompraResult = await db.query(insertQuery, insertValues);
-            const compraSalva = novaCompraResult.rows[0];
+            
+            // Monta objeto de resposta com link para o front
+            const compraFinal = {
+                ...novaCompraResult.rows[0],
+                link_reuniao: evData?.link_reuniao,
+                tipo: evData?.tipo
+            };
 
-            try {
-                await enviarIngressoEmail(meta.usuarioEmail, { 
-                    tituloEvento: meta.tituloEvento, 
-                    quantidade: meta.quantidade, 
-                    linkIngresso: `${process.env.FRONTEND_URL}/pagamento/sucesso?session_id=${session.id}`, 
-                    dataEvento: meta.dataEvento, 
-                    horaEvento: meta.horaEvento, 
-                    localEvento: meta.localEvento 
-                });
-            } catch (e) {
-                console.error("📧 Erro e-mail:", e.message);
-            }
-
-            return res.json(compraSalva);
+            return res.json(compraFinal);
         }
 
-        res.status(404).json({ error: "Compra não processada ainda." });
+        res.status(404).json({ error: "Compra não processada." });
 
     } catch (err) {
-        console.error("❌ Erro ao buscar detalhes:", err.message);
+        console.error("❌ Erro Detalhes:", err.message);
         res.status(500).json({ error: err.message });
     }
 };
@@ -252,7 +251,10 @@ exports.listarMeusIngressos = async (req, res) => {
     try {
         const { email } = req.query;
         const result = await db.query(
-            "SELECT *, TO_CHAR(data_evento, 'DD/MM/YYYY') as data FROM public.compras WHERE usuario_email = $1 ORDER BY id DESC", 
+            `SELECT c.*, e.link_reuniao, TO_CHAR(c.data_evento, 'DD/MM/YYYY') as data 
+             FROM public.compras c 
+             LEFT JOIN public.eventos e ON e.id = c.evento_id
+             WHERE c.usuario_email = $1 ORDER BY c.id DESC`, 
             [email]
         );
         res.json(result.rows);
