@@ -2,20 +2,14 @@ const express = require('express');
 const router = express.Router();
 const eventoController = require('../controllers/eventoController');
 const OnlineController = require('../controllers/OnlineController');
-const upload = require('../config/multer'); 
+const upload = require('../config/multer');
 
 // --- 1. ROTAS PÚBLICAS ---
 router.get('/', eventoController.listarTodosEventosParaVitrine);
 router.get('/vitrine', eventoController.listarTodosEventosParaVitrine);
 
 // --- 2. ROTAS DE CRIAÇÃO ---
-/** * ✅ CORREÇÃO CRÍTICA: 
- * Para 'novo-online', removemos o 'upload.single' porque o Frontend agora envia JSON (Base64).
- * O Multer (upload) impediria o Express de ler o campo 'link_reuniao' dentro do JSON.
- */
-router.post('/novo-online', OnlineController.criarEventoOnline);
-
-// Mantemos o upload para o presencial caso ele ainda use FormData/Arquivo real
+router.post('/novo-online', upload.single('imagem_capa'), OnlineController.criarEventoOnline);
 router.post('/novo-presencial', upload.single('imagem_capa'), eventoController.criarEventoPresencial);
 
 // --- 3. DASHBOARD & BUSCA ---
