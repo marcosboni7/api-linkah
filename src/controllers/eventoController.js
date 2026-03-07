@@ -1,13 +1,19 @@
 const db = require('../config/database');
 
 const CATEGORIAS_VALIDAS = [
-  'Arte & Cultura', 'Entretenimento', 'Negócios',
-  'Educação & Desenvolvimento', 'Esportes & Bem-estar',
-  'Experiências & Lifestyle', 'Família & Comunidade'
+  'Arte & Cultura',
+  'Entretenimento',
+  'Negócios',
+  'Educação & Desenvolvimento',
+  'Esportes & Bem-estar',
+  'Experiências & Lifestyle',
+  'Família & Comunidade'
 ];
 
-// Função de limpeza para evitar lixo no banco
-const limparCampo = (valor, fallback) => {
+// ------------------------------
+// HELPERS
+// ------------------------------
+const limparCampo = (valor, fallback = '') => {
   if (
     valor === undefined ||
     valor === null ||
@@ -18,10 +24,109 @@ const limparCampo = (valor, fallback) => {
   ) {
     return fallback;
   }
-  return valor;
+  return String(valor).trim();
 };
 
-// --- 1. LISTAR TODOS OS EVENTOS (VITRINE) ---
+const limparNumero = (valor, fallback = 0) => {
+  const numero = parseInt(valor, 10);
+  return Number.isNaN(numero) ? fallback : numero;
+};
+
+const normalizarEmail = (email) => {
+  const emailLimpo = limparCampo(email, '');
+  return emailLimpo ? emailLimpo.toLowerCase() : null;
+};
+
+const normalizarCategoria = (categoria) => {
+  const categoriaLimpa = limparCampo(categoria, 'Entretenimento');
+  return CATEGORIAS_VALIDAS.includes(categoriaLimpa)
+    ? categoriaLimpa
+    : 'Entretenimento';
+};
+
+const normalizarData = (valor) => {
+  if (
+    valor === undefined ||
+    valor === null ||
+    valor === 'undefined' ||
+    valor === 'null' ||
+    String(valor).trim() === ''
+  ) {
+    return null;
+  }
+
+  const data = String(valor).trim();
+
+  // Se vier como YYYY-MM-DDTHH:mm:ss..., corta só a data
+  if (data.includes('T')) {
+    return data.split('T')[0];
+  }
+
+  // Se já vier YYYY-MM-DD, mantém
+  if (/^\d{4}-\d{2}-\d{2}$/.test(data)) {
+    return data;
+  }
+
+  return data.substring(0, 10);
+};
+
+const normalizarHora = (valor) => {
+  if (
+    valor === undefined ||
+    valor === null ||
+    valor === 'undefined' ||
+    valor === 'null' ||
+    String(valor).trim() === ''
+  ) {
+    return null;
+  }
+
+  const hora = String(valor).trim();
+
+  // Mantém HH:mm ou HH:mm:ss
+  if (/^\d{2}:\d{2}$/.test(hora) || /^\d{2}:\d{2}:\d{2}$/.test(hora)) {
+    return hora;
+  }
+
+  return hora.substring(0, 8);
+};
+
+const obterImagemFinal = (req, imagemAtual = null) => {
+  let imagemFinal = imagemAtual;
+
+  // Prioridade 1: arquivo enviado via multer/S3
+  if (req.file) {
+    const arquivo = req.file.location || req.file.filename || req.file.path;
+    imagemFinal = String(arquivo).startsWith('http')
+      ? arquivo
+      : req.file.filename;
+  }
+
+  // Prioridade 2: string enviada no body
+  if (!req.file && req.body.imagem_capa) {
+    const imgBody = req.body.imagem_capa;
+
+    const isLixo =
+      !imgBody ||
+      imgBody === 'undefined' ||
+      imgBody === 'null' ||
+      String(imgBody).includes('/undefined') ||
+      String(imgBody).includes('[object Object]');
+
+    if (!isLixo) {
+      imagemFinal =
+        typeof imgBody === 'string' && imgBody.includes('/uploads/')
+          ? imgBody.split('/uploads/').pop()
+          : imgBody;
+    }
+  }
+
+  return imagemFinal;
+};
+
+// ------------------------------
+// 1. LISTAR TODOS OS EVENTOS (VITRINE)
+// ------------------------------
 exports.listarTodosEventosParaVitrine = async (req, res) => {
   try {
     const query = `
@@ -31,8 +136,8 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
         CASE
           WHEN e.imagem_capa ILIKE '%undefined%' OR e.imagem_capa ILIKE '%null%' THEN NULL
           ELSE e.imagem_capa
-        END as imagem_capa,
-        TO_CHAR(e.data_inicio, 'YYYY-MM-DD') as data_inicio,
+        END AS imagem_capa,
+        TO_CHAR(e.data_inicio, 'YYYY-MM-DD') AS data_inicio,
         e.hora_inicio,
         e.local_nome,
         e.cidade,
@@ -41,7 +146,7 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
         e.tipo,
         e.status,
         e.moeda,
-        COALESCE(MIN(i.preco), 0) as preco_minimo
+        COALESCE(MIN(i.preco), 0) AS preco_minimo
       FROM public.eventos e
       LEFT JOIN public.ingressos i ON e.id = i.evento_id
       WHERE e.status ILIKE 'Ativo'
@@ -54,18 +159,23 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
     const result = await db.query(query);
     return res.status(200).json(result.rows);
   } catch (err) {
-    console.error("❌ Erro ao listar vitrine:", err.message);
+    console.error('❌ Erro ao listar vitrine:', err.message);
     return res.status(500).json({ error: err.message });
   }
 };
 
-// --- 2. LISTAR EVENTOS POR PRODUTOR ---
+// ------------------------------
+// 2. LISTAR EVENTOS POR PRODUTOR
+// ------------------------------
 exports.listarEventosPorProdutor = async (req, res) => {
   const { email } = req.query;
-  if (!email) return res.status(400).json({ error: "Email não fornecido" });
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email não fornecido' });
+  }
 
   try {
-    const emailLimpo = email.replace(/['"]+/g, '').trim().toLowerCase();
+    const emailLimpo = String(email).replace(/['"]+/g, '').trim().toLowerCase();
 
     const query = `
       SELECT
@@ -74,9 +184,9 @@ exports.listarEventosPorProdutor = async (req, res) => {
         produtor_email,
         categoria,
         descricao,
-        TO_CHAR(data_inicio, 'YYYY-MM-DD') as data_inicio,
+        TO_CHAR(data_inicio, 'YYYY-MM-DD') AS data_inicio,
         hora_inicio,
-        TO_CHAR(data_termino, 'YYYY-MM-DD') as data_termino,
+        TO_CHAR(data_termino, 'YYYY-MM-DD') AS data_termino,
         hora_termino,
         local_nome,
         cep,
@@ -89,7 +199,7 @@ exports.listarEventosPorProdutor = async (req, res) => {
         CASE
           WHEN imagem_capa ILIKE '%undefined%' OR imagem_capa ILIKE '%null%' THEN NULL
           ELSE imagem_capa
-        END as imagem_capa,
+        END AS imagem_capa,
         tipo,
         status,
         moeda,
@@ -104,12 +214,14 @@ exports.listarEventosPorProdutor = async (req, res) => {
     const result = await db.query(query, [emailLimpo]);
     return res.status(200).json(result.rows);
   } catch (err) {
-    console.error("❌ Erro ao listar por produtor:", err.message);
+    console.error('❌ Erro ao listar por produtor:', err.message);
     return res.status(500).json({ error: err.message });
   }
 };
 
-// --- 3. BUSCAR EVENTO POR ID ---
+// ------------------------------
+// 3. BUSCAR EVENTO POR ID
+// ------------------------------
 exports.buscarEventoPorId = async (req, res) => {
   const { id } = req.params;
 
@@ -121,9 +233,9 @@ exports.buscarEventoPorId = async (req, res) => {
         e.produtor_email,
         e.categoria,
         e.descricao,
-        TO_CHAR(e.data_inicio, 'YYYY-MM-DD') as data_inicio,
+        TO_CHAR(e.data_inicio, 'YYYY-MM-DD') AS data_inicio,
         e.hora_inicio,
-        TO_CHAR(e.data_termino, 'YYYY-MM-DD') as data_termino,
+        TO_CHAR(e.data_termino, 'YYYY-MM-DD') AS data_termino,
         e.hora_termino,
         e.local_nome,
         e.cep,
@@ -136,15 +248,15 @@ exports.buscarEventoPorId = async (req, res) => {
         CASE
           WHEN e.imagem_capa ILIKE '%undefined%' OR e.imagem_capa ILIKE '%null%' THEN NULL
           ELSE e.imagem_capa
-        END as imagem_capa,
+        END AS imagem_capa,
         e.tipo,
         e.status,
         e.moeda,
         e.regras,
         e.visibilidade,
         e.link_reuniao,
-        p.nome as produtor_nome,
-        p.foto_perfil as produtor_foto
+        p.nome AS produtor_nome,
+        p.foto_perfil AS produtor_foto
       FROM public.eventos e
       LEFT JOIN public.produtores p ON e.produtor_email = p.email
       WHERE e.id = $1
@@ -153,7 +265,7 @@ exports.buscarEventoPorId = async (req, res) => {
     const result = await db.query(query, [id]);
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Evento não encontrado" });
+      return res.status(404).json({ message: 'Evento não encontrado' });
     }
 
     const evento = result.rows[0];
@@ -167,66 +279,86 @@ exports.buscarEventoPorId = async (req, res) => {
 
     return res.status(200).json(evento);
   } catch (err) {
-    console.error("❌ Erro ao buscar por ID:", err.message);
+    console.error('❌ Erro ao buscar por ID:', err.message);
     return res.status(500).json({ error: err.message });
   }
 };
 
-// --- 4. CRIAR EVENTO PRESENCIAL (CORRIGIDO: 22 COLUNAS + RESILIÊNCIA DE IMAGEM) ---
+// ------------------------------
+// 4. CRIAR EVENTO PRESENCIAL
+// ------------------------------
 exports.criarEventoPresencial = async (req, res) => {
-  console.log("--- 🚀 INICIANDO CRIAÇÃO DE EVENTO ---");
+  console.log('--- 🚀 INICIANDO CRIAÇÃO DE EVENTO PRESENCIAL ---');
 
-  let imagemFinal = null;
-
-  // Prioridade 1: Arquivo via Multer/S3
-  if (req.file) {
-    imagemFinal = req.file.location || req.file.filename || req.file.path;
-    if (imagemFinal && !String(imagemFinal).startsWith('http')) {
-      imagemFinal = req.file.filename;
-    }
-  }
-
-  // Prioridade 2: Fallback caso a imagem venha como string no body (evita placeholder vazio)
-  if (!imagemFinal && req.body.imagem_capa) {
-    const imgBody = req.body.imagem_capa;
-    const isLixo = !imgBody || imgBody === "undefined" || imgBody === "null" || String(imgBody).includes("/undefined") || String(imgBody).includes("[object Object]");
-    if (!isLixo) {
-      imagemFinal = typeof imgBody === 'string' && imgBody.includes('/uploads/')
-        ? imgBody.split('/uploads/').pop()
-        : imgBody;
-    }
-  }
+  const imagemFinal = obterImagemFinal(req);
 
   const {
-    nome, produtor_email, categoria, descricao, data_inicio,
-    hora_inicio, data_termino, hora_termino, local_nome,
-    cep, endereco, numero, complemento, cidade, estado,
-    capacidade, moeda, tipo, regras, visibilidade
+    nome,
+    produtor_email,
+    categoria,
+    descricao,
+    data_inicio,
+    hora_inicio,
+    data_termino,
+    hora_termino,
+    local_nome,
+    cep,
+    endereco,
+    numero,
+    complemento,
+    cidade,
+    estado,
+    capacidade,
+    moeda,
+    tipo,
+    regras,
+    visibilidade
   } = req.body;
 
   try {
     const query = `
       INSERT INTO public.eventos
       (
-        nome, produtor_email, categoria, descricao, data_inicio,
-        hora_inicio, data_termino, hora_termino, local_nome,
-        cep, endereco, numero, complemento, cidade, estado,
-        capacidade, imagem_capa, tipo, status, moeda,
-        regras, visibilidade
+        nome,
+        produtor_email,
+        categoria,
+        descricao,
+        data_inicio,
+        hora_inicio,
+        data_termino,
+        hora_termino,
+        local_nome,
+        cep,
+        endereco,
+        numero,
+        complemento,
+        cidade,
+        estado,
+        capacidade,
+        imagem_capa,
+        tipo,
+        status,
+        moeda,
+        regras,
+        visibilidade
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+      VALUES
+      (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+        $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+      )
       RETURNING id
     `;
 
     const values = [
       limparCampo(nome, 'Novo Evento'),
-      produtor_email ? produtor_email.toLowerCase() : null,
-      limparCampo(categoria, 'Entretenimento'),
+      normalizarEmail(produtor_email),
+      normalizarCategoria(categoria),
       limparCampo(descricao, ''),
-      data_inicio || null,
-      hora_inicio || null,
-      data_termino || null,
-      hora_termino || null,
+      normalizarData(data_inicio),
+      normalizarHora(hora_inicio),
+      normalizarData(data_termino),
+      normalizarHora(hora_termino),
       limparCampo(local_nome, ''),
       limparCampo(cep, ''),
       limparCampo(endereco, ''),
@@ -234,132 +366,299 @@ exports.criarEventoPresencial = async (req, res) => {
       limparCampo(complemento, ''),
       limparCampo(cidade, ''),
       limparCampo(estado, ''),
-      parseInt(capacidade) || 0,
+      limparNumero(capacidade, 0),
       imagemFinal,
-      tipo || 'Presencial',
+      limparCampo(tipo, 'Presencial'),
       'Ativo',
-      moeda || 'BRL',
+      limparCampo(moeda, 'BRL'),
       limparCampo(regras, ''),
-      visibilidade || 'Publico'
+      limparCampo(visibilidade, 'Publico')
     ];
 
     const result = await db.query(query, values);
-    console.log("✅ Evento salvo com sucesso! ID:", result.rows[0].id);
-    res.status(201).json({ message: "Evento criado!", id: result.rows[0].id });
 
+    console.log('✅ Evento presencial salvo com sucesso! ID:', result.rows[0].id);
+
+    return res.status(201).json({
+      message: 'Evento criado!',
+      id: result.rows[0].id
+    });
   } catch (err) {
-    console.error("❌ ERRO NO INSERT (500):", err.message);
-    res.status(500).json({ error: err.message, detail: err.detail });
+    console.error('❌ ERRO NO INSERT PRESENCIAL:', err.message);
+    return res.status(500).json({
+      error: err.message,
+      detail: err.detail
+    });
   }
 };
 
-// --- 5. ATUALIZAR EVENTO ---
+// ------------------------------
+// 5. CRIAR EVENTO ONLINE
+// ------------------------------
+exports.criarEventoOnline = async (req, res) => {
+  console.log('--- 🚀 INICIANDO CRIAÇÃO DE EVENTO ONLINE ---');
+
+  const imagemFinal = obterImagemFinal(req);
+
+  const {
+    nome,
+    produtor_email,
+    categoria,
+    descricao,
+    data_inicio,
+    hora_inicio,
+    data_termino,
+    hora_termino,
+    capacidade,
+    moeda,
+    tipo,
+    regras,
+    visibilidade,
+    link_reuniao,
+    local_nome
+  } = req.body;
+
+  try {
+    const query = `
+      INSERT INTO public.eventos
+      (
+        nome,
+        produtor_email,
+        categoria,
+        descricao,
+        data_inicio,
+        hora_inicio,
+        data_termino,
+        hora_termino,
+        local_nome,
+        cep,
+        endereco,
+        numero,
+        complemento,
+        cidade,
+        estado,
+        capacidade,
+        imagem_capa,
+        tipo,
+        status,
+        moeda,
+        regras,
+        visibilidade,
+        link_reuniao
+      )
+      VALUES
+      (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+        $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+      )
+      RETURNING id
+    `;
+
+    const values = [
+      limparCampo(nome, 'Novo Evento Online'),
+      normalizarEmail(produtor_email),
+      normalizarCategoria(categoria),
+      limparCampo(descricao, ''),
+      normalizarData(data_inicio),
+      normalizarHora(hora_inicio),
+      normalizarData(data_termino),
+      normalizarHora(hora_termino),
+      limparCampo(local_nome, 'Online'),
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      limparNumero(capacidade, 0),
+      imagemFinal,
+      limparCampo(tipo, 'Online'),
+      'Ativo',
+      limparCampo(moeda, 'BRL'),
+      limparCampo(regras, ''),
+      limparCampo(visibilidade, 'Publico'),
+      limparCampo(link_reuniao, '')
+    ];
+
+    const result = await db.query(query, values);
+
+    console.log('✅ Evento online salvo com sucesso! ID:', result.rows[0].id);
+
+    return res.status(201).json({
+      message: 'Evento online criado!',
+      id: result.rows[0].id
+    });
+  } catch (err) {
+    console.error('❌ ERRO NO INSERT ONLINE:', err.message);
+    return res.status(500).json({
+      error: err.message,
+      detail: err.detail
+    });
+  }
+};
+
+// ------------------------------
+// 6. ATUALIZAR EVENTO
+// ------------------------------
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const check = await db.query('SELECT * FROM public.eventos WHERE id = $1', [id]);
-    if (check.rowCount === 0) return res.status(404).json({ error: "Evento não encontrado" });
+    const check = await db.query(
+      'SELECT * FROM public.eventos WHERE id = $1',
+      [id]
+    );
 
-    const atual = check.rows[0];
-    let imagemFinal = atual.imagem_capa;
-
-    if (req.file) {
-      const arquivo = req.file.location || req.file.filename || req.file.path;
-      imagemFinal = String(arquivo).startsWith('http') ? arquivo : req.file.filename;
-    } else if (req.body.imagem_capa) {
-      const imgBody = req.body.imagem_capa;
-      const isLixo = !imgBody || imgBody === "undefined" || imgBody === "null" || String(imgBody).includes("/undefined");
-      if (!isLixo) {
-        imagemFinal = typeof imgBody === 'string' && imgBody.includes('/uploads/')
-          ? imgBody.split('/uploads/').pop()
-          : imgBody;
-      }
+    if (check.rowCount === 0) {
+      return res.status(404).json({ error: 'Evento não encontrado' });
     }
 
-    const dataInicioFinal =
-      req.body.data_inicio && req.body.data_inicio !== "null"
-        ? String(req.body.data_inicio).substring(0, 10)
-        : (atual.data_inicio ? String(atual.data_inicio).substring(0, 10) : null);
+    const atual = check.rows[0];
+    const imagemFinal = obterImagemFinal(req, atual.imagem_capa);
 
     const values = [
       limparCampo(req.body.nome, atual.nome),
-      limparCampo(req.body.categoria, atual.categoria),
+      normalizarCategoria(req.body.categoria || atual.categoria),
       limparCampo(req.body.descricao, atual.descricao),
-      dataInicioFinal,
-      limparCampo(req.body.local_nome, atual.local_nome),
+      normalizarData(req.body.data_inicio ?? atual.data_inicio),
+      normalizarHora(req.body.hora_inicio ?? atual.hora_inicio),
+      normalizarData(req.body.data_termino ?? atual.data_termino),
+      normalizarHora(req.body.hora_termino ?? atual.hora_termino),
+      limparCampo(req.body.local_nome, atual.local_nome || ''),
+      limparCampo(req.body.cep, atual.cep || ''),
+      limparCampo(req.body.endereco, atual.endereco || ''),
+      limparCampo(req.body.numero, atual.numero || ''),
+      limparCampo(req.body.complemento, atual.complemento || ''),
+      limparCampo(req.body.cidade, atual.cidade || ''),
+      limparCampo(req.body.estado, atual.estado || ''),
+      limparNumero(req.body.capacidade, atual.capacidade || 0),
       imagemFinal,
-      limparCampo(req.body.cidade, atual.cidade),
-      limparCampo(req.body.estado, atual.estado),
-      limparCampo(req.body.status, atual.status),
-      limparCampo(req.body.moeda, atual.moeda),
+      limparCampo(req.body.tipo, atual.tipo || 'Presencial'),
+      limparCampo(req.body.status, atual.status || 'Ativo'),
+      limparCampo(req.body.moeda, atual.moeda || 'BRL'),
+      limparCampo(req.body.regras, atual.regras || ''),
+      limparCampo(req.body.visibilidade, atual.visibilidade || 'Publico'),
+      limparCampo(req.body.link_reuniao, atual.link_reuniao || ''),
       id
     ];
 
     const queryUpdate = `
       UPDATE public.eventos
-      SET nome = $1, categoria = $2, descricao = $3, data_inicio = $4,
-          local_nome = $5, imagem_capa = $6, cidade = $7, estado = $8,
-          status = $9, moeda = $10
-      WHERE id = $11
+      SET
+        nome = $1,
+        categoria = $2,
+        descricao = $3,
+        data_inicio = $4,
+        hora_inicio = $5,
+        data_termino = $6,
+        hora_termino = $7,
+        local_nome = $8,
+        cep = $9,
+        endereco = $10,
+        numero = $11,
+        complemento = $12,
+        cidade = $13,
+        estado = $14,
+        capacidade = $15,
+        imagem_capa = $16,
+        tipo = $17,
+        status = $18,
+        moeda = $19,
+        regras = $20,
+        visibilidade = $21,
+        link_reuniao = $22
+      WHERE id = $23
       RETURNING *
     `;
 
     const result = await db.query(queryUpdate, values);
-    res.status(200).json({ message: "Atualizado!", evento: result.rows[0] });
 
+    return res.status(200).json({
+      message: 'Atualizado!',
+      evento: result.rows[0]
+    });
   } catch (err) {
-    console.error("❌ ERRO NO UPDATE:", err.message);
+    console.error('❌ ERRO NO UPDATE:', err.message);
     return res.status(500).json({ error: err.message });
   }
 };
 
-// --- 6. EXCLUIR EVENTO ---
+// ------------------------------
+// 7. EXCLUIR EVENTO
+// ------------------------------
 exports.excluirEvento = async (req, res) => {
   const { id } = req.params;
+
   try {
     await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
     await db.query('DELETE FROM public.eventos WHERE id = $1', [id]);
-    res.status(200).json({ message: "Excluído com sucesso" });
+
+    return res.status(200).json({ message: 'Excluído com sucesso' });
   } catch (err) {
-    console.error("❌ Erro ao excluir:", err.message);
-    res.status(500).json({ error: err.message });
+    console.error('❌ Erro ao excluir:', err.message);
+    return res.status(500).json({ error: err.message });
   }
 };
 
-// --- 7. SALVAR INGRESSOS ---
+// ------------------------------
+// 8. SALVAR INGRESSOS
+// ------------------------------
 exports.salvarIngressos = async (req, res) => {
   const { id } = req.params;
   const { ingressos, moeda_evento } = req.body;
+
   try {
     await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
+
     if (ingressos && Array.isArray(ingressos)) {
       for (const ing of ingressos) {
         await db.query(
-          'INSERT INTO public.ingressos (evento_id, nome, preco, quantidade, moeda) VALUES ($1, $2, $3, $4, $5)',
-          [id, ing.nome, ing.preco || 0, ing.quantidade || 0, moeda_evento || 'BRL']
+          `
+          INSERT INTO public.ingressos
+          (evento_id, nome, preco, quantidade, moeda)
+          VALUES ($1, $2, $3, $4, $5)
+          `,
+          [
+            id,
+            limparCampo(ing.nome, 'Ingresso'),
+            Number(ing.preco) || 0,
+            limparNumero(ing.quantidade, 0),
+            limparCampo(moeda_evento, 'BRL')
+          ]
         );
       }
     }
+
     if (moeda_evento) {
-      await db.query('UPDATE public.eventos SET moeda = $1 WHERE id = $2', [moeda_evento, id]);
+      await db.query(
+        'UPDATE public.eventos SET moeda = $1 WHERE id = $2',
+        [moeda_evento, id]
+      );
     }
-    res.status(200).json({ message: "Ingressos salvos!" });
+
+    return res.status(200).json({ message: 'Ingressos salvos!' });
   } catch (err) {
-    console.error("❌ Erro ao salvar ingressos:", err.message);
-    res.status(500).json({ error: err.message });
+    console.error('❌ Erro ao salvar ingressos:', err.message);
+    return res.status(500).json({ error: err.message });
   }
 };
 
-// --- 8. ATUALIZAR STATUS ---
+// ------------------------------
+// 9. ATUALIZAR STATUS
+// ------------------------------
 exports.atualizarStatus = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
+
   try {
-    await db.query('UPDATE public.eventos SET status = $1 WHERE id = $2', [status, id]);
-    res.status(200).json({ message: "Status atualizado" });
+    await db.query(
+      'UPDATE public.eventos SET status = $1 WHERE id = $2',
+      [status, id]
+    );
+
+    return res.status(200).json({ message: 'Status atualizado' });
   } catch (err) {
-    console.error("❌ Erro status:", err.message);
-    res.status(500).json({ error: err.message });
+    console.error('❌ Erro status:', err.message);
+    return res.status(500).json({ error: err.message });
   }
 };
