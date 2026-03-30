@@ -92,6 +92,23 @@ const inicializarBanco = async () => {
         status VARCHAR(50),
         data_compra TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS public.ingressos (
+        id SERIAL PRIMARY KEY,
+        evento_id INTEGER REFERENCES public.eventos(id),
+        usuario_email VARCHAR(255),
+        codigo_ingresso VARCHAR(100) UNIQUE,
+        status VARCHAR(50) DEFAULT 'Ativo',
+        data_emissao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS public.mensagens_v2 (
+        id SERIAL PRIMARY KEY,
+        comunidade_id INTEGER,
+        usuario_nome VARCHAR(255),
+        conteudo TEXT,
+        data_envio TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
     // --- 🚀 MIGRAÇÃO DE COLUNAS (TODOS OS CAMPOS POSSÍVEIS) ---
@@ -167,7 +184,7 @@ app.use('/api/pagamento', pagamentoRoutes);
 app.use('/api/compras', compraRoutes);
 app.use('/api/comunidades', comunidadeRoutes); 
 
-// Painel Staff
+// Painel Staff (Correção no campo de data para compatibilidade)
 app.use('/api/usuarios', async (req, res) => {
   try {
     const result = await db.query(`
