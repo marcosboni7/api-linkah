@@ -1,5 +1,10 @@
+const jwt = require('jsonwebtoken');
 const db = require('../config/database');
 const { sendMail } = require('../config/mailer');
+
+// --- CONFIGURAÇÃO DO JWT ---
+// O ideal é definir JWT_SECRET nas variáveis de ambiente do Render
+const JWT_SECRET = process.env.JWT_SECRET || 'linkah_secret_fallback_2026';
 
 // --- 1. CADASTRO DE PRODUTOR ---
 exports.registerProdutor = async (req, res) => {
@@ -52,7 +57,8 @@ exports.registerProdutor = async (req, res) => {
         const newUser = resultInsert.rows[0];
         console.log(`✅ [DEPLOY LOG] Sucesso! ID: ${newUser.id}`);
 
-        sendMail(email, 'Bem-vindo à Linkah!', `<h2>Olá ${nome}!</h2>`).catch(err => {
+        // E-mail em background
+        sendMail(email, 'Bem-vindo à Linkah!', `<h2>Olá ${nome}!</h2><p>Sua conta de produtor foi criada.</p>`).catch(err => {
             console.error("⚠️ [DEPLOY LOG] Erro Mailer:", err.message);
         });
 
@@ -71,7 +77,7 @@ exports.registerProdutor = async (req, res) => {
     }
 };
 
-// --- 2. LOGIN (Versão Ultra-Debug) ---
+// --- 2. LOGIN (Com Geração de Token JWT) ---
 exports.login = async (req, res) => {
     console.log("🔑 [DEPLOY LOG] Nova tentativa de Login recebida");
     try {
@@ -98,22 +104,30 @@ exports.login = async (req, res) => {
         }
 
         const user = result.rows[0];
-        console.log(`👤 [DEPLOY LOG] Usuário encontrado! Verificando campos...`);
-
-        // Debug de campos para o F12 saber o que está vindo do banco
-        const camposDisponiveis = Object.keys(user);
-        console.log(`📊 [DEPLOY LOG] Colunas retornadas do banco: ${camposDisponiveis.join(', ')}`);
+        console.log(`👤 [DEPLOY LOG] Usuário encontrado: ${user.email}`);
 
         if (user.status === 'Banido') {
             return res.status(403).json({ message: "Sua conta está suspensa." });
         }
 
+        // --- GERAÇÃO DO TOKEN JWT ---
+        const token = jwt.sign(
+            { 
+                id: user.id, 
+                email: user.email, 
+                role: user.role || 'user' 
+            },
+            JWT_SECRET,
+            { expiresIn: '7d' } // Token válido por 7 dias
+        );
+
         const perfilCompleto = !!(user.cpf_cnpj && user.cep && user.telefone);
 
-        console.log(`✅ [DEPLOY LOG] Login finalizado com sucesso para: ${user.email}`);
+        console.log(`✅ [DEPLOY LOG] Login OK. Token gerado para: ${user.email}`);
 
         return res.status(200).json({ 
             message: "Login realizado!", 
+            token: token, // O Frontend (Next.js) precisa desse campo
             user: { 
                 id: user.id || null, 
                 nome: user.nome || 'Usuário', 
