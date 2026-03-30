@@ -3,22 +3,21 @@ const { sendMail } = require('../config/mailer');
 
 // --- 1. CADASTRO DE PRODUTOR ---
 exports.registerProdutor = async (req, res) => {
+    console.log("📝 [DEPLOY LOG] Iniciando registro de produtor...");
     try {
         const nome = (req.body.nome || '').trim();
         const email = (req.body.email || '').trim().toLowerCase();
         const senha = String(req.body.senha || '');
 
-        if (!nome || !email || !senha) {
-            return res.status(400).json({ message: "Nome, E-mail e Senha são obrigatórios." });
-        }
+        console.log(`🔎 [DEPLOY LOG] Verificando existência do email: ${email}`);
 
-        // Verifica se já existe em produtores ou usuários
         const checkUser = await db.query(
             'SELECT email FROM public.produtores WHERE LOWER(email) = $1 UNION SELECT email FROM public.usuarios WHERE LOWER(email) = $1', 
             [email]
         );
         
         if (checkUser.rows.length > 0) {
+            console.log(`⚠️ [DEPLOY LOG] Email já cadastrado: ${email}`);
             return res.status(400).json({ message: "Este e-mail já está cadastrado no sistema." });
         }
 
@@ -48,33 +47,33 @@ exports.registerProdutor = async (req, res) => {
             'produtor'
         ];
 
-        // Salva no Banco
+        console.log(`💾 [DEPLOY LOG] Tentando salvar no banco...`);
         const resultInsert = await db.query(query, values);
         const newUser = resultInsert.rows[0];
-        console.log(`✅ Novo produtor salvo: ${email} (ID: ${newUser.id})`);
+        console.log(`✅ [DEPLOY LOG] Sucesso! ID: ${newUser.id}`);
 
-        // E-mail em background (não trava o cadastro se falhar)
-        const htmlContent = `<h2>Olá ${nome}, bem-vindo à Linkah!</h2><p>Sua conta foi criada com sucesso.</p>`;
-        sendMail(email, 'Bem-vindo à Linkah!', htmlContent).catch(err => {
-            console.error("⚠️ Falha no envio do e-mail:", err.message);
+        sendMail(email, 'Bem-vindo à Linkah!', `<h2>Olá ${nome}!</h2>`).catch(err => {
+            console.error("⚠️ [DEPLOY LOG] Erro Mailer:", err.message);
         });
 
         return res.status(201).json({ 
-            message: "Cadastro realizado com sucesso!",
+            message: "Cadastro realizado!",
             user: { id: newUser.id, nome, email }
         });
 
     } catch (err) {
-        console.error("❌ ERRO NO REGISTRO:", err.message);
+        console.error("❌ [DEPLOY LOG] ERRO NO REGISTRO:", err.stack);
         return res.status(500).json({ 
             message: "Erro ao processar cadastro",
-            debug: err.message 
+            debug: err.message,
+            stack: err.stack
         });
     }
 };
 
-// --- 2. LOGIN (Versão Blindada) ---
+// --- 2. LOGIN (Versão Ultra-Debug) ---
 exports.login = async (req, res) => {
+    console.log("🔑 [DEPLOY LOG] Nova tentativa de Login recebida");
     try {
         const email = (req.body.email || '').trim().toLowerCase();
         const senha = String(req.body.senha || '').trim();
@@ -83,37 +82,40 @@ exports.login = async (req, res) => {
             return res.status(400).json({ message: "E-mail e senha são obrigatórios." });
         }
 
-        console.log(`🔑 Tentativa de login: ${email}`);
+        console.log(`📡 [DEPLOY LOG] Buscando usuário: ${email}`);
 
-        // Busca em produtores (usando LOWER para evitar erro de Case Sensitive)
+        // Busca em produtores
         let result = await db.query('SELECT * FROM public.produtores WHERE LOWER(email) = $1 AND senha = $2', [email, senha]);
         
-        // Se não achou, busca em usuários
         if (result.rows.length === 0) {
+            console.log(`📡 [DEPLOY LOG] Não achou em produtores, buscando em usuários...`);
             result = await db.query('SELECT * FROM public.usuarios WHERE LOWER(email) = $1 AND senha = $2', [email, senha]);
         }
         
         if (result.rows.length === 0) {
-            console.log(`❌ Credenciais inválidas para: ${email}`);
+            console.log(`❌ [DEPLOY LOG] Credenciais incorretas para: ${email}`);
             return res.status(401).json({ message: "E-mail ou senha incorretos." });
         }
 
         const user = result.rows[0];
+        console.log(`👤 [DEPLOY LOG] Usuário encontrado! Verificando campos...`);
 
-        // Bloqueio de segurança
+        // Debug de campos para o F12 saber o que está vindo do banco
+        const camposDisponiveis = Object.keys(user);
+        console.log(`📊 [DEPLOY LOG] Colunas retornadas do banco: ${camposDisponiveis.join(', ')}`);
+
         if (user.status === 'Banido') {
             return res.status(403).json({ message: "Sua conta está suspensa." });
         }
 
-        // Lógica de perfil completo com proteção opcional (?.)
         const perfilCompleto = !!(user.cpf_cnpj && user.cep && user.telefone);
 
-        console.log(`✅ Login OK: ${user.email}`);
+        console.log(`✅ [DEPLOY LOG] Login finalizado com sucesso para: ${user.email}`);
 
         return res.status(200).json({ 
             message: "Login realizado!", 
             user: { 
-                id: user.id, // Agora garantido pelo seu ALTER TABLE
+                id: user.id || null, 
                 nome: user.nome || 'Usuário', 
                 email: user.email, 
                 role: user.role || 'user',
@@ -123,51 +125,46 @@ exports.login = async (req, res) => {
         });
 
     } catch (err) { 
-        console.error("❌ ERRO CRÍTICO NO LOGIN:", err.message);
+        console.error("❌ [DEPLOY LOG] ERRO CRÍTICO NO LOGIN:", err.stack);
         return res.status(500).json({ 
             message: "Erro interno no servidor de login",
-            debug: err.message 
+            debug: err.message,
+            stack: err.stack 
         }); 
     }
 };
 
 // --- 3. BUSCAR PERFIL ---
 exports.getPerfil = async (req, res) => {
+    console.log("👤 [DEPLOY LOG] Buscando perfil...");
     try {
         const email = (req.query.email || '').trim().toLowerCase();
-        if (!email) return res.status(400).json({ message: "Email é necessário." });
-
         let result = await db.query('SELECT * FROM public.produtores WHERE LOWER(email) = $1', [email]);
         if (result.rows.length === 0) {
             result = await db.query('SELECT * FROM public.usuarios WHERE LOWER(email) = $1', [email]);
         }
-
-        if (result.rows.length === 0) return res.status(404).json({ message: "Usuário não encontrado." });
+        if (result.rows.length === 0) return res.status(404).json({ message: "Não encontrado." });
         
-        // Remove a senha antes de enviar para o frontend por segurança
         const { senha, ...dadosPublicos } = result.rows[0];
         return res.status(200).json(dadosPublicos);
     } catch (err) { 
+        console.error("❌ [DEPLOY LOG] ERRO GET PERFIL:", err.message);
         return res.status(500).json({ message: "Erro ao buscar perfil", debug: err.message }); 
     }
 };
 
 // --- 4. ATUALIZAR PERFIL ---
 exports.updatePerfil = async (req, res) => {
+    console.log("🆙 [DEPLOY LOG] Atualizando perfil...");
     try {
         const { email_original, nome, cpf_cnpj, cep, rua, numero, bairro, estado, telefone, razao_social } = req.body;
-        
-        if (!email_original) return res.status(400).json({ message: "Email original não informado." });
-        
         const emailLower = email_original.toLowerCase();
 
-        // Tenta atualizar em produtores
         let updateResult = await db.query(
             `UPDATE public.produtores SET nome=$1, cpf_cnpj=$2, cep=$3, rua=$4, numero=$5, bairro=$6, estado=$7, telefone=$8, razao_social=$9 WHERE LOWER(email)=$10`,
             [nome, cpf_cnpj, cep, rua, numero, bairro, estado, telefone, razao_social, emailLower]
         );
 
-        // Se não afetou nenhuma linha, tenta em usuários
         if (updateResult.rowCount === 0) {
             await db.query(
                 `UPDATE public.usuarios SET nome=$1, telefone=$2 WHERE LOWER(email)=$3`,
@@ -175,9 +172,10 @@ exports.updatePerfil = async (req, res) => {
             );
         }
 
+        console.log(`✅ [DEPLOY LOG] Perfil atualizado para: ${emailLower}`);
         return res.status(200).json({ message: "Perfil atualizado com sucesso!" });
     } catch (err) { 
-        console.error("❌ ERRO UPDATE:", err.message);
+        console.error("❌ [DEPLOY LOG] ERRO UPDATE:", err.message);
         return res.status(500).json({ message: "Erro ao atualizar perfil", debug: err.message }); 
     }
 };
