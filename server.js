@@ -56,7 +56,7 @@ const inicializarBanco = async () => {
     console.log('--- 🔄 Verificando Banco de Dados ---');
     await db.query('SELECT NOW()');
     
-    // 1. Criar Tabelas Base
+    // Tabelas Base
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.usuarios (
         id SERIAL PRIMARY KEY,
@@ -94,12 +94,15 @@ const inicializarBanco = async () => {
       );
     `);
 
-    // --- 🚀 LISTA DE COLUNAS ADICIONAIS (MIGRAÇÕES) ---
+    // --- 🚀 MIGRAÇÃO DE COLUNAS (TODOS OS CAMPOS POSSÍVEIS) ---
     const colunas = [
-      // PRODUTORES (Campos que estavam faltando no seu Registro)
+      // PRODUTORES
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS telefone VARCHAR(255)",
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS tipo VARCHAR(50)",
+      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS data_nascimento DATE",
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS cpf_cnpj VARCHAR(255)",
+      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS rg VARCHAR(50)",
+      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS genero VARCHAR(50)",
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS stripe_account_id VARCHAR(255)",
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS cep VARCHAR(20)",
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS rua VARCHAR(255)",
@@ -107,10 +110,13 @@ const inicializarBanco = async () => {
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS bairro VARCHAR(255)",
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS cidade VARCHAR(255)",
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS estado VARCHAR(255)",
+      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS complemento VARCHAR(255)",
       
       // USUÁRIOS
       "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS telefone VARCHAR(255)",
+      "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS data_nascimento DATE",
       "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS tipo VARCHAR(50)",
+      "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS cpf_cnpj VARCHAR(255)",
       "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS stripe_account_id VARCHAR(255)",
 
       // EVENTOS
@@ -136,14 +142,13 @@ const inicializarBanco = async () => {
       try {
         await db.query(sql);
       } catch (err) {
-        // Ignora apenas o erro de "coluna já existe", loga os outros
         if (!err.message.includes('already exists')) {
-          console.error(`⚠️ Erro ao aplicar: ${sql} -> ${err.message}`);
+          console.error(`⚠️ Falha na coluna: ${sql} -> ${err.message}`);
         }
       }
     }
 
-    console.log('✅ Banco de dados sincronizado e protegido!');
+    console.log('✅ Banco de dados sincronizado e blindado!');
   } catch (err) {
     console.error('❌ ERRO NA SINCRONIZAÇÃO:', err.message);
   }
