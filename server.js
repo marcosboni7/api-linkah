@@ -5,7 +5,6 @@ const helmet = require('helmet');
 const path = require('path');
 
 // --- 1. IMPORTAÇÃO DE ROTAS E CONFIGS ---
-// Como server.js está na raiz, buscamos dentro de ./src/
 const authRoutes = require('./src/routes/authRoutes');
 const eventoRoutes = require('./src/routes/eventoRoutes');
 const compraRoutes = require('./src/routes/compraRoutes');
@@ -32,13 +31,11 @@ app.use(helmet({
 }));
 
 // --- 3. ROTA DE WEBHOOK (STRIPE) ---
-// Deve vir ANTES do express.json() para não corromper a assinatura do Stripe
 app.post(
   ['/api/pagamento/webhook', '/api/pagamentos/webhook'],
   express.raw({ type: 'application/json' }),
   (req, res) => {
     const webhookHandler = pagamentoController.ouvirStripe || pagamentoController.webhookStripe;
-    
     if (typeof webhookHandler === 'function') {
       return webhookHandler(req, res);
     } else {
@@ -48,11 +45,9 @@ app.post(
   }
 );
 
-// PARSERS JSON E PASTA ESTÁTICA
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Serve arquivos estáticos (fotos de perfil, capas de eventos)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // --- 4. INICIALIZAÇÃO DO BANCO (MIGRAÇÕES) ---
@@ -99,8 +94,22 @@ const inicializarBanco = async () => {
       );
     `);
 
-    // Atualização de Colunas Individuais (Garante que o app não quebre se a coluna já existir)
+    // --- 🚀 CORREÇÃO CRÍTICA: ADICIONANDO COLUNAS QUE FALTAVAM ---
     const colunas = [
+      // Colunas de Produtores (Onde estava dando erro no seu log)
+      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS telefone VARCHAR(255)",
+      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS cpf_cnpj VARCHAR(255)",
+      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS stripe_account_id VARCHAR(255)",
+      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS cep VARCHAR(20)",
+      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS rua VARCHAR(255)",
+      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS numero VARCHAR(50)",
+      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS bairro VARCHAR(255)",
+      
+      // Colunas de Usuários
+      "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS telefone VARCHAR(255)",
+      "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS stripe_account_id VARCHAR(255)",
+
+      // Colunas de Eventos
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS link_reuniao TEXT",
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS tipo VARCHAR(50)",
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS preco DECIMAL(10,2) DEFAULT 0",
@@ -110,18 +119,25 @@ const inicializarBanco = async () => {
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS data_inicio DATE",
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS hora_inicio TIME",
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS local_nome VARCHAR(255)",
+      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS cidade VARCHAR(100)",
+      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS estado VARCHAR(100)",
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS stripe_account_id VARCHAR(255)",
+
+      // Colunas de Compras
       "ALTER TABLE public.compras ADD COLUMN IF NOT EXISTS valor_total DECIMAL(10,2)",
-      "ALTER TABLE public.compras ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255)",
-      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS stripe_account_id VARCHAR(255)",
-      "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS stripe_account_id VARCHAR(255)"
+      "ALTER TABLE public.compras ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255)"
     ];
 
     for (const sql of colunas) {
-      await db.query(sql).catch(err => {}); // Ignora erros se a coluna já existir
+      await db.query(sql).catch(err => {
+        // Silencioso se a coluna já existir, loga se for outro erro
+        if (!err.message.includes('already exists')) {
+            console.log('⚠️ Aviso na migração:', err.message);
+        }
+      });
     }
 
-    console.log('✅ Banco de dados sincronizado!');
+    console.log('✅ Banco de dados sincronizado e colunas atualizadas!');
   } catch (err) {
     console.error('❌ ERRO NA SINCRONIZAÇÃO:', err.message);
   }
@@ -137,10 +153,10 @@ app.use((req, res, next) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 app.use('/api/pagamento', pagamentoRoutes);
-  app.use('/api/compras', compraRoutes);
+app.use('/api/compras', compraRoutes);
 app.use('/api/comunidades', comunidadeRoutes); 
 
-// Painel Staff (Listagem de usuários)
+// Painel Staff
 app.use('/api/usuarios', async (req, res) => {
   try {
     const result = await db.query(`
@@ -155,14 +171,12 @@ app.use('/api/usuarios', async (req, res) => {
   }
 });
 
-// Endpoint de teste rápido
 app.get('/ping', (req, res) => res.status(200).json({ status: 'Linkah API Online', timestamp: new Date() }));
 
 // --- 7. START ---
-// O Render define a porta automaticamente na variável process.env.PORT
 const PORT = process.env.PORT || 3001;
 
 app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`🚀 Servidor rodando na porta: ${PORT}`);
+  console.log(`🚀 Linkah API voando na porta: ${PORT}`);
   await inicializarBanco();
 });
