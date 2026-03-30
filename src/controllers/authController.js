@@ -29,7 +29,7 @@ exports.registerProdutor = async (req, res) => {
                 razao_social, status, role
             ) 
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) 
-            RETURNING email, nome;
+            RETURNING id, email, nome;
         `;
         
         const values = [
@@ -48,28 +48,32 @@ exports.registerProdutor = async (req, res) => {
             'produtor'
         ];
 
-        // Salva no Banco primeiro
-        await db.query(query, values);
-        console.log(`✅ Novo produtor salvo no banco: ${email}`);
+        // Salva no Banco
+        const resultInsert = await db.query(query, values);
+        const newUser = resultInsert.rows[0];
+        console.log(`✅ Novo produtor salvo: ${email} (ID: ${newUser.id})`);
 
-        // Tenta enviar e-mail em background
+        // E-mail em background (não trava o cadastro se falhar)
         const htmlContent = `<h2>Olá ${nome}, bem-vindo à Linkah!</h2><p>Sua conta foi criada com sucesso.</p>`;
         sendMail(email, 'Bem-vindo à Linkah!', htmlContent).catch(err => {
-            console.error("⚠️ Falha silenciosa no envio do e-mail:", err.message);
+            console.error("⚠️ Falha no envio do e-mail:", err.message);
         });
 
         return res.status(201).json({ 
             message: "Cadastro realizado com sucesso!",
-            user: { nome, email }
+            user: { id: newUser.id, nome, email }
         });
 
     } catch (err) {
         console.error("❌ ERRO NO REGISTRO:", err.message);
-        return res.status(500).json({ message: "Erro ao processar cadastro: " + err.message });
+        return res.status(500).json({ 
+            message: "Erro ao processar cadastro",
+            debug: err.message 
+        });
     }
 };
 
-// --- 2. LOGIN (Versão Blindada contra Erro 500) ---
+// --- 2. LOGIN (Versão Blindada) ---
 exports.login = async (req, res) => {
     try {
         const email = (req.body.email || '').trim().toLowerCase();
@@ -81,7 +85,7 @@ exports.login = async (req, res) => {
 
         console.log(`🔑 Tentativa de login: ${email}`);
 
-        // Busca primeiro em produtores
+        // Busca em produtores (usando LOWER para evitar erro de Case Sensitive)
         let result = await db.query('SELECT * FROM public.produtores WHERE LOWER(email) = $1 AND senha = $2', [email, senha]);
         
         // Se não achou, busca em usuários
@@ -96,21 +100,20 @@ exports.login = async (req, res) => {
 
         const user = result.rows[0];
 
-        // Verificação de Status
+        // Bloqueio de segurança
         if (user.status === 'Banido') {
-            return res.status(403).json({ message: "Sua conta está permanentemente suspensa." });
+            return res.status(403).json({ message: "Sua conta está suspensa." });
         }
 
-        // Verifica se o perfil está completo (evita quebrar se a coluna não existir em 'usuarios')
-        const temCpf = user.cpf_cnpj ? true : false;
-        const temCep = user.cep ? true : false;
-        const perfilCompleto = temCpf && temCep;
+        // Lógica de perfil completo com proteção opcional (?.)
+        const perfilCompleto = !!(user.cpf_cnpj && user.cep && user.telefone);
 
-        console.log(`✅ Login bem-sucedido: ${user.email}`);
+        console.log(`✅ Login OK: ${user.email}`);
 
         return res.status(200).json({ 
             message: "Login realizado!", 
             user: { 
+                id: user.id, // Agora garantido pelo seu ALTER TABLE
                 nome: user.nome || 'Usuário', 
                 email: user.email, 
                 role: user.role || 'user',
@@ -118,6 +121,7 @@ exports.login = async (req, res) => {
                 perfil_completo: perfilCompleto 
             } 
         });
+
     } catch (err) { 
         console.error("❌ ERRO CRÍTICO NO LOGIN:", err.message);
         return res.status(500).json({ 
@@ -140,9 +144,11 @@ exports.getPerfil = async (req, res) => {
 
         if (result.rows.length === 0) return res.status(404).json({ message: "Usuário não encontrado." });
         
-        return res.status(200).json(result.rows[0]);
+        // Remove a senha antes de enviar para o frontend por segurança
+        const { senha, ...dadosPublicos } = result.rows[0];
+        return res.status(200).json(dadosPublicos);
     } catch (err) { 
-        return res.status(500).json({ message: "Erro ao buscar perfil" }); 
+        return res.status(500).json({ message: "Erro ao buscar perfil", debug: err.message }); 
     }
 };
 
@@ -155,11 +161,13 @@ exports.updatePerfil = async (req, res) => {
         
         const emailLower = email_original.toLowerCase();
 
+        // Tenta atualizar em produtores
         let updateResult = await db.query(
             `UPDATE public.produtores SET nome=$1, cpf_cnpj=$2, cep=$3, rua=$4, numero=$5, bairro=$6, estado=$7, telefone=$8, razao_social=$9 WHERE LOWER(email)=$10`,
             [nome, cpf_cnpj, cep, rua, numero, bairro, estado, telefone, razao_social, emailLower]
         );
 
+        // Se não afetou nenhuma linha, tenta em usuários
         if (updateResult.rowCount === 0) {
             await db.query(
                 `UPDATE public.usuarios SET nome=$1, telefone=$2 WHERE LOWER(email)=$3`,
@@ -170,6 +178,6 @@ exports.updatePerfil = async (req, res) => {
         return res.status(200).json({ message: "Perfil atualizado com sucesso!" });
     } catch (err) { 
         console.error("❌ ERRO UPDATE:", err.message);
-        return res.status(500).json({ message: "Erro ao atualizar perfil" }); 
+        return res.status(500).json({ message: "Erro ao atualizar perfil", debug: err.message }); 
     }
 };
