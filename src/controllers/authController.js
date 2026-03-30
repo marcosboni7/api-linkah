@@ -6,7 +6,7 @@ exports.registerProdutor = async (req, res) => {
     try {
         const nome = (req.body.nome || '').trim();
         const email = (req.body.email || '').trim().toLowerCase();
-        const senha = req.body.senha;
+        const senha = String(req.body.senha || '');
 
         if (!nome || !email || !senha) {
             return res.status(400).json({ message: "Nome, E-mail e Senha são obrigatórios." });
@@ -19,10 +19,9 @@ exports.registerProdutor = async (req, res) => {
         );
         
         if (checkUser.rows.length > 0) {
-            return res.status(400).json({ message: "Este e-mail já está cadastrado." });
+            return res.status(400).json({ message: "Este e-mail já está cadastrado no sistema." });
         }
 
-        // INSERT com todos os campos que criamos no pgAdmin
         const query = `
             INSERT INTO public.produtores (
                 nome, email, senha, cpf_cnpj, telefone, tipo, 
@@ -49,24 +48,16 @@ exports.registerProdutor = async (req, res) => {
             'produtor'
         ];
 
-        // 🛡️ PASSO 1: Salva no Banco primeiro
+        // Salva no Banco primeiro
         await db.query(query, values);
+        console.log(`✅ Novo produtor salvo no banco: ${email}`);
 
-        // 🛡️ PASSO 2: Tenta enviar e-mail (SEM AWAIT para não travar o registro)
-        const htmlContent = `
-            <div style="font-family: sans-serif; padding: 20px;">
-                <h2>Olá ${nome}, bem-vindo à Linkah!</h2>
-                <p>Sua conta de produtor foi criada com sucesso.</p>
-                <p>Acesse o painel para cadastrar seus eventos.</p>
-            </div>
-        `;
-
+        // Tenta enviar e-mail em background
+        const htmlContent = `<h2>Olá ${nome}, bem-vindo à Linkah!</h2><p>Sua conta foi criada com sucesso.</p>`;
         sendMail(email, 'Bem-vindo à Linkah!', htmlContent).catch(err => {
-            // Se a API Key for inválida, o erro aparece no log, mas o usuário não percebe
-            console.error("⚠️ Erro de E-mail (Resend):", err.message);
+            console.error("⚠️ Falha silenciosa no envio do e-mail:", err.message);
         });
 
-        // 🛡️ PASSO 3: Resposta de sucesso imediata
         return res.status(201).json({ 
             message: "Cadastro realizado com sucesso!",
             user: { nome, email }
@@ -78,24 +69,28 @@ exports.registerProdutor = async (req, res) => {
     }
 };
 
-// --- 2. LOGIN ---
+// --- 2. LOGIN (Versão Blindada contra Erro 500) ---
 exports.login = async (req, res) => {
     try {
         const email = (req.body.email || '').trim().toLowerCase();
-        const senha = (req.body.senha || '').trim();
+        const senha = String(req.body.senha || '').trim();
 
         if (!email || !senha) {
             return res.status(400).json({ message: "E-mail e senha são obrigatórios." });
         }
 
-        // Busca em ambas as tabelas
+        console.log(`🔑 Tentativa de login: ${email}`);
+
+        // Busca primeiro em produtores
         let result = await db.query('SELECT * FROM public.produtores WHERE LOWER(email) = $1 AND senha = $2', [email, senha]);
         
+        // Se não achou, busca em usuários
         if (result.rows.length === 0) {
             result = await db.query('SELECT * FROM public.usuarios WHERE LOWER(email) = $1 AND senha = $2', [email, senha]);
         }
         
         if (result.rows.length === 0) {
+            console.log(`❌ Credenciais inválidas para: ${email}`);
             return res.status(401).json({ message: "E-mail ou senha incorretos." });
         }
 
@@ -106,21 +101,29 @@ exports.login = async (req, res) => {
             return res.status(403).json({ message: "Sua conta está permanentemente suspensa." });
         }
 
-        const perfilCompleto = !!(user.cpf_cnpj && user.cep);
+        // Verifica se o perfil está completo (evita quebrar se a coluna não existir em 'usuarios')
+        const temCpf = user.cpf_cnpj ? true : false;
+        const temCep = user.cep ? true : false;
+        const perfilCompleto = temCpf && temCep;
+
+        console.log(`✅ Login bem-sucedido: ${user.email}`);
 
         return res.status(200).json({ 
             message: "Login realizado!", 
             user: { 
-                nome: user.nome, 
+                nome: user.nome || 'Usuário', 
                 email: user.email, 
-                role: user.role,
-                status: user.status,
+                role: user.role || 'user',
+                status: user.status || 'Ativo',
                 perfil_completo: perfilCompleto 
             } 
         });
     } catch (err) { 
-        console.error("❌ ERRO LOGIN:", err.message);
-        return res.status(500).json({ message: "Erro interno no servidor de login" }); 
+        console.error("❌ ERRO CRÍTICO NO LOGIN:", err.message);
+        return res.status(500).json({ 
+            message: "Erro interno no servidor de login",
+            debug: err.message 
+        }); 
     }
 };
 
@@ -128,7 +131,8 @@ exports.login = async (req, res) => {
 exports.getPerfil = async (req, res) => {
     try {
         const email = (req.query.email || '').trim().toLowerCase();
-        
+        if (!email) return res.status(400).json({ message: "Email é necessário." });
+
         let result = await db.query('SELECT * FROM public.produtores WHERE LOWER(email) = $1', [email]);
         if (result.rows.length === 0) {
             result = await db.query('SELECT * FROM public.usuarios WHERE LOWER(email) = $1', [email]);
@@ -146,6 +150,9 @@ exports.getPerfil = async (req, res) => {
 exports.updatePerfil = async (req, res) => {
     try {
         const { email_original, nome, cpf_cnpj, cep, rua, numero, bairro, estado, telefone, razao_social } = req.body;
+        
+        if (!email_original) return res.status(400).json({ message: "Email original não informado." });
+        
         const emailLower = email_original.toLowerCase();
 
         let updateResult = await db.query(
