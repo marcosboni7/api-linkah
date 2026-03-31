@@ -33,7 +33,6 @@ exports.criarSessaoCheckout = async (req, res) => {
       return res.status(500).json({ error: 'FRONTEND_URL inválida ou ausente.' });
     }
 
-    // QUERY CORRIGIDA: Agora faz LEFT JOIN com ambas as tabelas e usa COALESCE para pegar o ID que não for nulo
     const dadosEventoBD = await db.query(
       `SELECT 
         e.id, e.nome, e.data_inicio, e.hora_inicio, e.local_nome, e.preco, e.tipo, e.link_reuniao,
@@ -90,7 +89,6 @@ exports.criarSessaoCheckout = async (req, res) => {
       cancel_url: `${baseUrl}/venda?eventoId=${ev.id}&qtd=${quantidade}`,
     };
 
-    // Se houver um ID de conta Stripe, configura a divisão do dinheiro (Split)
     if (ev.stripe_account_id) {
       const feePercent = 0.05; // Sua comissão de 5%
       sessionParams.payment_intent_data = {
@@ -103,82 +101,29 @@ exports.criarSessaoCheckout = async (req, res) => {
     return res.json({ url: session.url });
   } catch (err) {
     console.error('❌ Erro Stripe Checkout:', err);
-    return res.status(500).json({
-      error: err.message || 'Erro ao criar checkout Stripe.',
-      type: err.type || null,
-      code: err.code || null,
-    });
+    return res.status(500).json({ error: err.message });
   }
 };
 
 // --- 2. VINCULAR CONTA DO PRODUTOR ---
 exports.vincularContaStripe = async (req, res) => {
   try {
-    if (!process.env.STRIPE_SECRET_KEY) {
-      return res.status(500).json({ error: 'STRIPE_SECRET_KEY não configurada.' });
-    }
-
-    if (!isValidHttpUrl(FRONTEND_URL)) {
-      return res.status(500).json({
-        error: 'FRONTEND_URL inválida ou ausente.',
-        details: `Valor atual: ${FRONTEND_URL || 'undefined'}`,
-      });
-    }
-
     const { email } = req.body;
+    const produtorResult = await db.query('SELECT stripe_account_id FROM public.produtores WHERE email = $1 LIMIT 1', [email]);
+    const usuarioResult = await db.query('SELECT stripe_account_id FROM public.usuarios WHERE email = $1 LIMIT 1', [email]);
+    const registro = produtorResult.rows[0] || usuarioResult.rows[0];
 
-    if (!email || typeof email !== 'string') {
-      return res.status(400).json({ error: 'Email é obrigatório.' });
-    }
-
-    console.log('🔗 Iniciando Stripe Connect para:', email);
-
-    const produtorResult = await db.query(
-      'SELECT email, nome, stripe_account_id FROM public.produtores WHERE email = $1 LIMIT 1',
-      [email]
-    );
-
-    const usuarioResult = await db.query(
-      'SELECT email, nome, stripe_account_id FROM public.usuarios WHERE email = $1 LIMIT 1',
-      [email]
-    );
-
-    const produtor = produtorResult.rows[0] || null;
-    const usuario = usuarioResult.rows[0] || null;
-    const registro = produtor || usuario;
-
-    if (!registro) {
-      return res.status(404).json({ error: 'Usuário não encontrado para vincular Stripe.' });
-    }
-
-    let stripeAccountId = registro.stripe_account_id || null;
+    let stripeAccountId = registro?.stripe_account_id || null;
 
     if (!stripeAccountId) {
       const account = await stripe.accounts.create({
         type: 'express',
         email,
-        capabilities: {
-          card_payments: { requested: true },
-          transfers: { requested: true },
-        },
-        business_type: 'individual',
+        capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
       });
-
       stripeAccountId = account.id;
-
-      await db.query(
-        'UPDATE public.produtores SET stripe_account_id = $1 WHERE email = $2',
-        [stripeAccountId, email]
-      );
-
-      await db.query(
-        'UPDATE public.usuarios SET stripe_account_id = $1 WHERE email = $2',
-        [stripeAccountId, email]
-      );
-
-      console.log('✅ Conta Stripe criada:', stripeAccountId);
-    } else {
-      console.log('ℹ️ Reutilizando conta Stripe existente:', stripeAccountId);
+      await db.query('UPDATE public.produtores SET stripe_account_id = $1 WHERE email = $2', [stripeAccountId, email]);
+      await db.query('UPDATE public.usuarios SET stripe_account_id = $1 WHERE email = $2', [stripeAccountId, email]);
     }
 
     const accountLink = await stripe.accountLinks.create({
@@ -188,84 +133,34 @@ exports.vincularContaStripe = async (req, res) => {
       type: 'account_onboarding',
     });
 
-    return res.json({
-      ok: true,
-      account_id: stripeAccountId,
-      url: accountLink.url,
-    });
+    return res.json({ ok: true, url: accountLink.url });
   } catch (err) {
-    console.error('❌ Erro Onboarding Stripe:', err);
-    return res.status(500).json({
-      error: err.message || 'Erro ao conectar Stripe.',
-      type: err.type || null,
-      code: err.code || null,
-      rawType: err.rawType || null,
-    });
+    console.error('❌ Erro Onboarding:', err);
+    return res.status(500).json({ error: err.message });
   }
 };
 
 // --- 3. VERIFICAR STATUS DA CONTA ---
 exports.verificarStatusStripe = async (req, res) => {
   try {
-    if (!process.env.STRIPE_SECRET_KEY) {
-      return res.status(500).json({ error: 'STRIPE_SECRET_KEY não configurada.' });
-    }
-
     const { email } = req.query;
+    const result = await db.query('SELECT stripe_account_id FROM public.produtores WHERE email = $1 LIMIT 1', [email]);
+    const stripeAccountId = result.rows[0]?.stripe_account_id;
 
-    if (!email) {
-      return res.status(400).json({ error: 'Email é obrigatório.' });
-    }
+    if (!stripeAccountId) return res.json({ conectado: false });
 
-    let result = await db.query(
-      'SELECT stripe_account_id, nome, email FROM public.produtores WHERE email = $1 LIMIT 1',
-      [email]
-    );
-
-    if (!result.rows[0]) {
-      result = await db.query(
-        'SELECT stripe_account_id, nome, email FROM public.usuarios WHERE email = $1 LIMIT 1',
-        [email]
-      );
-    }
-
-    if (!result.rows[0]?.stripe_account_id) {
-      return res.json({ conectado: false });
-    }
-
-    const stripeAccountId = result.rows[0].stripe_account_id;
     const account = await stripe.accounts.retrieve(stripeAccountId);
-
-    if (account.details_submitted) {
-      await db.query("UPDATE public.produtores SET status = 'Ativo' WHERE email = $1", [email]);
-      await db.query("UPDATE public.usuarios SET status = 'Ativo' WHERE email = $1", [email]);
-    }
-
     return res.json({
       conectado: true,
-      account_id: stripeAccountId,
       status_banco: account.details_submitted ? 'Ativo' : 'Pendente',
-      charges_enabled: account.charges_enabled,
-      payouts_enabled: account.payouts_enabled,
       details_submitted: account.details_submitted,
-      business_name:
-        account.business_profile?.name ||
-        account.company?.name ||
-        result.rows[0].nome ||
-        'Conta Vinculada',
-      email_stripe: account.email || result.rows[0].email || '',
     });
   } catch (err) {
-    console.error('❌ Erro ao verificar status Stripe:', err);
-    return res.status(500).json({
-      error: err.message || 'Erro ao verificar status Stripe.',
-      type: err.type || null,
-      code: err.code || null,
-    });
+    return res.status(500).json({ error: err.message });
   }
 };
 
-// --- 4. WEBHOOK ---
+// --- 4. WEBHOOK (CORRIGIDO PARA O E-MAIL FUNCIONAR) ---
 exports.webhookStripe = async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
@@ -273,6 +168,7 @@ exports.webhookStripe = async (req, res) => {
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
+    console.error(`⚠️ Webhook Signature Error: ${err.message}`);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
@@ -280,23 +176,24 @@ exports.webhookStripe = async (req, res) => {
     const session = event.data.object;
     const meta = session.metadata;
 
+    console.log(`\n🔔 Webhook recebido para: ${meta.usuarioEmail}`);
+
     try {
-      const existe = await db.query('SELECT id FROM public.compras WHERE stripe_session_id = $1', [session.id]);
+      // 1. Verifica se a compra já existe no banco
+      const existeResult = await db.query('SELECT id FROM public.compras WHERE stripe_session_id = $1', [session.id]);
+      const jaExisteNoBanco = existeResult.rows.length > 0;
 
-      if (existe.rows.length === 0) {
-        const idEvento = parseInt(meta.eventoId);
-        const evResult = await db.query(
-          'SELECT nome, link_reuniao, tipo FROM public.eventos WHERE id = $1',
-          [idEvento]
-        );
-        const evData = evResult.rows[0];
+      const idEvento = parseInt(meta.eventoId);
+      const evResult = await db.query('SELECT nome, link_reuniao, tipo FROM public.eventos WHERE id = $1', [idEvento]);
+      const evData = evResult.rows[0];
 
+      // 2. Se não existir, registra (caso o webhook chegue antes do redirecionamento)
+      if (!jaExisteNoBanco) {
+        console.log("📝 Registrando nova compra via Webhook...");
         await db.query(
-          `
-          INSERT INTO public.compras 
+          `INSERT INTO public.compras 
           (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
-          VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7)
-        `,
+          VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7)`,
           [
             meta.usuarioEmail,
             idEvento,
@@ -307,21 +204,25 @@ exports.webhookStripe = async (req, res) => {
             session.id,
           ]
         );
-
-        console.log(`📧 Enviando e-mail para: ${meta.usuarioEmail}`);
-        await enviarIngressoEmail(meta.usuarioEmail, {
-          tituloEvento: evData?.nome || meta.tituloEvento,
-          quantidade: meta.quantidade,
-          linkIngresso: `${FRONTEND_URL}/pagamento/sucesso?session_id=${session.id}`,
-          dataEvento: meta.dataEvento,
-          horaEvento: meta.horaEvento,
-          localEvento: meta.localEvento,
-          linkReuniao: evData?.link_reuniao || '',
-          tipo: evData?.tipo,
-        });
       }
+
+      // 3. ENVIO DO E-MAIL (Fora do bloco de inserção para garantir o disparo)
+      console.log(`📧 Disparando e-mail de ingresso para: ${meta.usuarioEmail}`);
+      await enviarIngressoEmail(meta.usuarioEmail, {
+        tituloEvento: evData?.nome || meta.tituloEvento,
+        quantidade: meta.quantidade,
+        linkIngresso: `${FRONTEND_URL}/pagamento/sucesso?session_id=${session.id}`,
+        dataEvento: meta.dataEvento,
+        horaEvento: meta.horaEvento,
+        localEvento: meta.localEvento,
+        linkReuniao: evData?.link_reuniao || meta.linkReuniao || '',
+        tipo: evData?.tipo || 'presencial'
+      });
+
+      console.log("✅ Webhook processado e e-mail enviado!");
+
     } catch (err) {
-      console.error('❌ Erro no Webhook:', err.message);
+      console.error('❌ Erro no processamento interno do Webhook:', err.message);
     }
   }
 
@@ -345,45 +246,24 @@ exports.buscarDetalhesCompra = async (req, res) => {
       return res.json(result.rows[0]);
     }
 
+    // Fallback: Se o webhook atrasou, busca no Stripe e insere agora
     const session = await stripe.checkout.sessions.retrieve(sessionId);
-
     if (session.payment_status === 'paid') {
       const meta = session.metadata;
-      const idEvento = parseInt(meta.eventoId);
-
-      const evResult = await db.query(
-        'SELECT nome, link_reuniao, tipo FROM public.eventos WHERE id = $1',
-        [idEvento]
-      );
+      const evResult = await db.query('SELECT nome, link_reuniao, tipo FROM public.eventos WHERE id = $1', [parseInt(meta.eventoId)]);
       const evData = evResult.rows[0];
 
-      const insertQuery = `
-        INSERT INTO public.compras 
-        (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
-        VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7)
-        RETURNING *
-      `;
+      const novaCompra = await db.query(
+        `INSERT INTO public.compras 
+         (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
+         VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7) RETURNING *`,
+        [meta.usuarioEmail, parseInt(meta.eventoId), evData?.nome || meta.tituloEvento, new Date(), parseInt(meta.quantidade), session.amount_total / 100, session.id]
+      );
 
-      const insertValues = [
-        meta.usuarioEmail,
-        idEvento,
-        evData?.nome || meta.tituloEvento,
-        new Date(),
-        parseInt(meta.quantidade),
-        session.amount_total / 100,
-        session.id,
-      ];
-
-      const novaCompraResult = await db.query(insertQuery, insertValues);
-
-      return res.json({
-        ...novaCompraResult.rows[0],
-        link_reuniao: evData?.link_reuniao,
-        tipo: evData?.tipo,
-      });
+      return res.json({ ...novaCompra.rows[0], link_reuniao: evData?.link_reuniao, tipo: evData?.tipo });
     }
 
-    return res.status(404).json({ error: 'Compra não processada.' });
+    return res.status(404).json({ error: 'Compra não encontrada.' });
   } catch (err) {
     console.error('❌ Erro Detalhes:', err.message);
     return res.status(500).json({ error: err.message });
@@ -394,7 +274,6 @@ exports.buscarDetalhesCompra = async (req, res) => {
 exports.listarMeusIngressos = async (req, res) => {
   try {
     const { email } = req.query;
-
     const result = await db.query(
       `SELECT c.*, e.link_reuniao, TO_CHAR(c.data_evento, 'DD/MM/YYYY') as data 
        FROM public.compras c 
@@ -402,7 +281,6 @@ exports.listarMeusIngressos = async (req, res) => {
        WHERE c.usuario_email = $1 ORDER BY c.id DESC`,
       [email]
     );
-
     return res.json(result.rows);
   } catch (err) {
     return res.status(500).json({ error: 'Erro ao buscar ingressos.' });
