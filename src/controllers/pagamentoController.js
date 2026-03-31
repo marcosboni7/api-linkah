@@ -33,10 +33,14 @@ exports.criarSessaoCheckout = async (req, res) => {
       return res.status(500).json({ error: 'FRONTEND_URL inválida ou ausente.' });
     }
 
+    // QUERY CORRIGIDA: Agora faz LEFT JOIN com ambas as tabelas e usa COALESCE para pegar o ID que não for nulo
     const dadosEventoBD = await db.query(
-      `SELECT e.id, e.nome, e.data_inicio, e.hora_inicio, e.local_nome, e.preco, e.tipo, e.link_reuniao, p.stripe_account_id 
+      `SELECT 
+        e.id, e.nome, e.data_inicio, e.hora_inicio, e.local_nome, e.preco, e.tipo, e.link_reuniao,
+        COALESCE(p.stripe_account_id, u.stripe_account_id) as stripe_account_id
        FROM public.eventos e
-       JOIN public.produtores p ON e.produtor_email = p.email 
+       LEFT JOIN public.produtores p ON e.produtor_email = p.email 
+       LEFT JOIN public.usuarios u ON e.produtor_email = u.email
        WHERE e.id = $1`,
       [evento.id]
     );
@@ -86,8 +90,9 @@ exports.criarSessaoCheckout = async (req, res) => {
       cancel_url: `${baseUrl}/venda?eventoId=${ev.id}&qtd=${quantidade}`,
     };
 
+    // Se houver um ID de conta Stripe, configura a divisão do dinheiro (Split)
     if (ev.stripe_account_id) {
-      const feePercent = 0.05;
+      const feePercent = 0.05; // Sua comissão de 5%
       sessionParams.payment_intent_data = {
         application_fee_amount: Math.round(precoFinalEmCentavos * feePercent * parseInt(quantidade)),
         transfer_data: { destination: ev.stripe_account_id },
