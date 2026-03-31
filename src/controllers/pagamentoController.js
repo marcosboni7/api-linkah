@@ -82,7 +82,7 @@ exports.criarSessaoCheckout = async (req, res) => {
         quantidade: quantidade.toString(),
         dataEvento: ev.data_inicio ? new Date(ev.data_inicio).toLocaleDateString('pt-BR') : 'A confirmar',
         horaEvento: ev.hora_inicio || 'A confirmar',
-        localEvento: ev.tipo === 'online' ? 'Evento Online' : ev.local_nome || 'Local a definir',
+        localEvento: ev.tipo?.toLowerCase() === 'online' ? 'Evento Online' : ev.local_nome || 'Local a definir',
         linkReuniao: ev.link_reuniao || '',
       },
       success_url: `${baseUrl}/pagamento/sucesso?session_id={CHECKOUT_SESSION_ID}`,
@@ -206,8 +206,12 @@ exports.webhookStripe = async (req, res) => {
         );
       }
 
-      // 3. ENVIO DO E-MAIL (Fora do bloco de inserção para garantir o disparo)
-      console.log(`📧 Disparando e-mail de ingresso para: ${meta.usuarioEmail}`);
+      // 3. ENVIO DO E-MAIL
+      // Ajuste: Forçamos o tipo para minúsculo para garantir a lógica do template do e-mail
+      const tipoEvento = (evData?.tipo || meta.tipo || 'presencial').toLowerCase();
+      
+      console.log(`📧 Disparando e-mail de ingresso para: ${meta.usuarioEmail} (Tipo: ${tipoEvento})`);
+      
       await enviarIngressoEmail(meta.usuarioEmail, {
         tituloEvento: evData?.nome || meta.tituloEvento,
         quantidade: meta.quantidade,
@@ -216,7 +220,7 @@ exports.webhookStripe = async (req, res) => {
         horaEvento: meta.horaEvento,
         localEvento: meta.localEvento,
         linkReuniao: evData?.link_reuniao || meta.linkReuniao || '',
-        tipo: evData?.tipo || 'presencial'
+        tipo: tipoEvento
       });
 
       console.log("✅ Webhook processado e e-mail enviado!");
