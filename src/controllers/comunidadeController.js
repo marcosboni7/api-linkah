@@ -4,7 +4,6 @@ const db = require('../config/database');
  * ==========================================
  * 1️⃣ VITRINE DE COMUNIDADES
  * ==========================================
- * Retorna comunidades para home
  */
 exports.getComunidadesVitrine = async (req, res) => {
   try {
@@ -16,8 +15,8 @@ exports.getComunidadesVitrine = async (req, res) => {
         e.descricao,
         e.imagem_capa AS imagem_url,
         (
-          SELECT COUNT(DISTINCT usuario_nome) 
-          FROM public.mensagens_v2 
+          SELECT COUNT(DISTINCT usuario_nome)
+          FROM public.mensagens_v2
           WHERE evento_id = e.id
         ) + 120 AS total_membros
       FROM public.eventos e
@@ -28,11 +27,13 @@ exports.getComunidadesVitrine = async (req, res) => {
       LIMIT 3
     `);
 
-    return res.status(200).json(result.rows);
+    res.status(200).json(result.rows);
 
   } catch (err) {
+
     console.error('❌ ERRO VITRINE:', err.message);
-    return res.status(500).json({
+
+    res.status(500).json({
       error: 'Erro ao carregar comunidades'
     });
   }
@@ -43,8 +44,6 @@ exports.getComunidadesVitrine = async (req, res) => {
  * ==========================================
  * 2️⃣ ENVIAR MENSAGEM
  * ==========================================
- * Salva mensagem no banco
- * Busca automaticamente o avatar do usuário
  */
 exports.enviarMensagem = async (req, res) => {
 
@@ -65,31 +64,6 @@ exports.enviarMensagem = async (req, res) => {
 
   try {
 
-    let foto = usuario_foto || null;
-
-    /**
-     * Se o frontend não mandar foto
-     * buscamos automaticamente no banco
-     */
-    if (!foto) {
-
-      const user = await db.query(`
-        SELECT avatar 
-        FROM public.usuarios 
-        WHERE LOWER(nome) = LOWER($1)
-
-        UNION
-
-        SELECT avatar 
-        FROM public.produtores 
-        WHERE LOWER(nome) = LOWER($1)
-
-        LIMIT 1
-      `, [usuario_nome]);
-
-      foto = user.rows[0]?.avatar || null;
-    }
-
     const result = await db.query(`
       INSERT INTO public.mensagens_v2
       (
@@ -106,19 +80,19 @@ exports.enviarMensagem = async (req, res) => {
     [
       evento_id,
       usuario_nome,
-      foto,
+      usuario_foto || null,
       texto,
       imagem || null,
       tipo || 'chat'
     ]);
 
-    return res.status(201).json(result.rows[0]);
+    res.status(201).json(result.rows[0]);
 
   } catch (err) {
 
-    console.error('❌ ERRO SALVAR MENSAGEM:', err);
+    console.error('❌ ERRO SALVAR MENSAGEM:', err.message);
 
-    return res.status(500).json({
+    res.status(500).json({
       error: 'Erro ao salvar mensagem'
     });
   }
@@ -129,7 +103,6 @@ exports.enviarMensagem = async (req, res) => {
  * ==========================================
  * 3️⃣ LISTAR MENSAGENS
  * ==========================================
- * Retorna histórico do chat
  */
 exports.listarMensagensPorEvento = async (req, res) => {
 
@@ -152,13 +125,13 @@ exports.listarMensagensPorEvento = async (req, res) => {
       ORDER BY criado_em ASC
     `, [evento_id]);
 
-    return res.status(200).json(result.rows);
+    res.status(200).json(result.rows);
 
   } catch (err) {
 
     console.error('❌ ERRO LISTAR MENSAGENS:', err.message);
 
-    return res.status(500).json({
+    res.status(500).json({
       error: 'Erro ao buscar mensagens'
     });
   }
@@ -192,7 +165,6 @@ exports.atualizarPresenca = async (req, res) => {
           ultima_vez
         )
         VALUES ($1,$2,$3,NOW())
-
         ON CONFLICT (evento_id, usuario_nome)
         DO UPDATE SET
           ultima_vez = NOW(),
@@ -221,13 +193,13 @@ exports.atualizarPresenca = async (req, res) => {
       WHERE evento_id = $1
     `, [id]);
 
-    return res.status(200).json(online.rows);
+    res.status(200).json(online.rows);
 
   } catch (err) {
 
     console.error('❌ ERRO PRESENÇA:', err.message);
 
-    return res.status(500).json({
+    res.status(500).json({
       error: 'Erro ao processar presença'
     });
   }
