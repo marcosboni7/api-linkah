@@ -109,15 +109,16 @@ const normalizarHora = (valor) => {
   return hora.substring(0, 8);
 };
 
+// ✅ CORRIGIDO: agora salva URL completa da Cloudinary
 const obterImagemFinal = (req, imagemAtual = null) => {
   let imagemFinal = imagemAtual;
 
   if (req.file) {
-    imagemFinal = req.file.location || req.file.filename || req.file.path;
-
-    if (!String(imagemFinal).startsWith('http')) {
-      imagemFinal = req.file.filename;
-    }
+    imagemFinal =
+      req.file.path ||
+      req.file.secure_url ||
+      req.file.url ||
+      imagemAtual;
   } else if (req.body.imagem_capa) {
     const imgBody = req.body.imagem_capa;
 
@@ -129,10 +130,7 @@ const obterImagemFinal = (req, imagemAtual = null) => {
       String(imgBody).includes('[object Object]');
 
     if (!isLixo) {
-      imagemFinal =
-        typeof imgBody === 'string' && imgBody.includes('/uploads/')
-          ? imgBody.split('/uploads/').pop()
-          : imgBody;
+      imagemFinal = String(imgBody).trim();
     }
   }
 
@@ -306,7 +304,7 @@ exports.criarEventoOnline = async (req, res) => {
   }
 };
 
-// 6. ATUALIZAR EVENTO (CORRIGIDO)
+// 6. ATUALIZAR EVENTO
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
 
@@ -321,29 +319,29 @@ exports.atualizarEvento = async (req, res) => {
     const dataTerminoFinal = req.body.data_termino !== undefined ? normalizarData(req.body.data_termino) : normalizarData(atual.data_termino);
 
     const values = [
-      limparCampo(req.body.nome, atual.nome),                  // $1
-      normalizarCategoria(req.body.categoria || atual.categoria), // $2
-      limparCampo(req.body.descricao, atual.descricao),         // $3
-      dataInicioFinal,                                         // $4
-      normalizarHora(req.body.hora_inicio ?? atual.hora_inicio), // $5
-      dataTerminoFinal,                                        // $6
-      normalizarHora(req.body.hora_termino ?? atual.hora_termino), // $7
-      limparCampo(req.body.local_nome, atual.local_nome || ''), // $8
-      limparCampo(req.body.cep, atual.cep || ''),               // $9
-      limparCampo(req.body.endereco, atual.endereco || ''),     // $10
-      limparCampo(req.body.numero, atual.numero || ''),         // $11
-      limparCampo(req.body.complemento, atual.complemento || ''),// $12
-      limparCampo(req.body.cidade, atual.cidade || ''),         // $13
-      limparCampo(req.body.estado, atual.estado || ''),         // $14
-      limparNumero(req.body.capacidade, atual.capacidade || 0), // $15
-      imagemFinal,                                              // $16
-      limparCampo(req.body.tipo, atual.tipo || 'Presencial'),   // $17
-      limparCampo(req.body.status, atual.status || 'Ativo'),     // $18
-      limparCampo(req.body.moeda, atual.moeda || 'BRL'),        // $19
-      limparCampo(req.body.regras, atual.regras || ''),         // $20
-      limparCampo(req.body.visibilidade, atual.visibilidade || 'Publico'), // $21
-      limparCampo(req.body.link_reuniao, atual.link_reuniao || ''), // $22
-      id                                                        // $23
+      limparCampo(req.body.nome, atual.nome),
+      normalizarCategoria(req.body.categoria || atual.categoria),
+      limparCampo(req.body.descricao, atual.descricao),
+      dataInicioFinal,
+      normalizarHora(req.body.hora_inicio ?? atual.hora_inicio),
+      dataTerminoFinal,
+      normalizarHora(req.body.hora_termino ?? atual.hora_termino),
+      limparCampo(req.body.local_nome, atual.local_nome || ''),
+      limparCampo(req.body.cep, atual.cep || ''),
+      limparCampo(req.body.endereco, atual.endereco || ''),
+      limparCampo(req.body.numero, atual.numero || ''),
+      limparCampo(req.body.complemento, atual.complemento || ''),
+      limparCampo(req.body.cidade, atual.cidade || ''),
+      limparCampo(req.body.estado, atual.estado || ''),
+      limparNumero(req.body.capacidade, atual.capacidade || 0),
+      imagemFinal,
+      limparCampo(req.body.tipo, atual.tipo || 'Presencial'),
+      limparCampo(req.body.status, atual.status || 'Ativo'),
+      limparCampo(req.body.moeda, atual.moeda || 'BRL'),
+      limparCampo(req.body.regras, atual.regras || ''),
+      limparCampo(req.body.visibilidade, atual.visibilidade || 'Publico'),
+      limparCampo(req.body.link_reuniao, atual.link_reuniao || ''),
+      id
     ];
 
     const queryUpdate = `
