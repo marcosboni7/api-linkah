@@ -166,21 +166,33 @@ exports.getPerfil = async (req, res) => {
     }
 };
 
-// --- 4. ATUALIZAR PERFIL ---
+// --- 4. ATUALIZAR PERFIL (BIO E REDES SOCIAIS) ---
 exports.updatePerfil = async (req, res) => {
     console.log("🆙 [DEPLOY LOG] Atualizando perfil...");
     try {
-        const { email_original, nome, cpf_cnpj, cep, rua, numero, bairro, estado, telefone, razao_social, bio, instagram, linkedin } = req.body;
+        const { 
+            email_original, nome, cpf_cnpj, cep, rua, numero, 
+            bairro, estado, telefone, razao_social, 
+            bio, instagram, linkedin 
+        } = req.body;
+        
         const emailLower = email_original.toLowerCase();
 
+        // Tenta atualizar produtores
         let updateResult = await db.query(
-            `UPDATE public.produtores SET nome=$1, cpf_cnpj=$2, cep=$3, rua=$4, numero=$5, bairro=$6, estado=$7, telefone=$8, razao_social=$9, bio=$10, instagram=$11, linkedin=$12 WHERE LOWER(email)=$13`,
+            `UPDATE public.produtores SET 
+                nome=$1, cpf_cnpj=$2, cep=$3, rua=$4, numero=$5, bairro=$6, 
+                estado=$7, telefone=$8, razao_social=$9, bio=$10, instagram=$11, linkedin=$12 
+             WHERE LOWER(email)=$13`,
             [nome, cpf_cnpj, cep, rua, numero, bairro, estado, telefone, razao_social, bio, instagram, linkedin, emailLower]
         );
 
+        // Se não encontrar em produtores, tenta atualizar usuários
         if (updateResult.rowCount === 0) {
             await db.query(
-                `UPDATE public.usuarios SET nome=$1, telefone=$2, bio=$3, instagram=$4, linkedin=$5 WHERE LOWER(email)=$6`,
+                `UPDATE public.usuarios SET 
+                    nome=$1, telefone=$2, bio=$3, instagram=$4, linkedin=$5 
+                 WHERE LOWER(email)=$6`,
                 [nome, telefone, bio, instagram, linkedin, emailLower]
             );
         }
@@ -194,7 +206,6 @@ exports.updatePerfil = async (req, res) => {
 };
 
 // --- 5. BUSCAR PERFIL PÚBLICO (PARA O CHAT) ---
-// Esta é a função que o Modal de Perfil chama!
 exports.getPerfilPublico = async (req, res) => {
     console.log("🔍 [DEPLOY LOG] Buscando perfil público para o chat...");
     try {
@@ -204,7 +215,7 @@ exports.getPerfilPublico = async (req, res) => {
             return res.status(400).json({ message: "Nome do usuário é obrigatório." });
         }
 
-        // Busca dados limitados (segurança) em ambas as tabelas pelo nome
+        // Busca dados limitados (segurança)
         let result = await db.query(
             'SELECT nome, bio, instagram, linkedin, role, status FROM public.produtores WHERE nome = $1', 
             [nome]
