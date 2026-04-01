@@ -122,6 +122,7 @@ exports.vincularContaStripe = async (req, res) => {
         capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
       });
       stripeAccountId = account.id;
+      // Atualiza em ambas as tabelas para garantir
       await db.query('UPDATE public.produtores SET stripe_account_id = $1 WHERE email = $2', [stripeAccountId, email]);
       await db.query('UPDATE public.usuarios SET stripe_account_id = $1 WHERE email = $2', [stripeAccountId, email]);
     }
@@ -140,7 +141,7 @@ exports.vincularContaStripe = async (req, res) => {
   }
 };
 
-// --- 3. VERIFICAR STATUS DA CONTA ---
+// --- 3. VERIFICAR STATUS DA CONTA (CORRIGIDO) ---
 exports.verificarStatusStripe = async (req, res) => {
   try {
     const { email } = req.query;
@@ -149,18 +150,29 @@ exports.verificarStatusStripe = async (req, res) => {
 
     if (!stripeAccountId) return res.json({ conectado: false });
 
+    // Busca os dados REAIS da conta no Stripe
     const account = await stripe.accounts.retrieve(stripeAccountId);
+
+    // Lógica rigorosa: só está ativo se o Stripe liberou cobranças (charges) e transferências (payouts)
+    const temPendencias = account.requirements.currently_due.length > 0;
+    const estaHabilitado = account.charges_enabled && account.payouts_enabled;
+
     return res.json({
       conectado: true,
-      status_banco: account.details_submitted ? 'Ativo' : 'Pendente',
+      status_banco: (estaHabilitado && !temPendencias) ? 'Ativo' : 'Pendente',
       details_submitted: account.details_submitted,
+      charges_enabled: account.charges_enabled,
+      payouts_enabled: account.payouts_enabled,
+      business_name: account.settings?.dashboard?.display_name || 'Conta Vinculada',
+      email_stripe: account.email
     });
   } catch (err) {
+    console.error('❌ Erro ao verificar status Stripe:', err.message);
     return res.status(500).json({ error: err.message });
   }
 };
 
-// --- 4. WEBHOOK (CORRIGIDO PARA O E-MAIL FUNCIONAR) ---
+// --- 4. WEBHOOK ---
 exports.webhookStripe = async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
@@ -179,7 +191,6 @@ exports.webhookStripe = async (req, res) => {
     console.log(`\n🔔 Webhook recebido para: ${meta.usuarioEmail}`);
 
     try {
-      // 1. Verifica se a compra já existe no banco
       const existeResult = await db.query('SELECT id FROM public.compras WHERE stripe_session_id = $1', [session.id]);
       const jaExisteNoBanco = existeResult.rows.length > 0;
 
@@ -187,9 +198,7 @@ exports.webhookStripe = async (req, res) => {
       const evResult = await db.query('SELECT nome, link_reuniao, tipo FROM public.eventos WHERE id = $1', [idEvento]);
       const evData = evResult.rows[0];
 
-      // 2. Se não existir, registra (caso o webhook chegue antes do redirecionamento)
       if (!jaExisteNoBanco) {
-        console.log("📝 Registrando nova compra via Webhook...");
         await db.query(
           `INSERT INTO public.compras 
           (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
@@ -206,11 +215,7 @@ exports.webhookStripe = async (req, res) => {
         );
       }
 
-      // 3. ENVIO DO E-MAIL
-      // Ajuste: Forçamos o tipo para minúsculo para garantir a lógica do template do e-mail
       const tipoEvento = (evData?.tipo || meta.tipo || 'presencial').toLowerCase();
-      
-      console.log(`📧 Disparando e-mail de ingresso para: ${meta.usuarioEmail} (Tipo: ${tipoEvento})`);
       
       await enviarIngressoEmail(meta.usuarioEmail, {
         tituloEvento: evData?.nome || meta.tituloEvento,
@@ -250,7 +255,6 @@ exports.buscarDetalhesCompra = async (req, res) => {
       return res.json(result.rows[0]);
     }
 
-    // Fallback: Se o webhook atrasou, busca no Stripe e insere agora
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     if (session.payment_status === 'paid') {
       const meta = session.metadata;
