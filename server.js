@@ -17,37 +17,28 @@ const db = require('./src/config/database');
 const app = express();
 app.set('trust proxy', 1);
 
-
-
 // ========================================
-// ORIGENS PERMITIDAS
+// ORIGENS PERMITIDAS (CORS ATUALIZADO)
 // ========================================
-
 const allowedOrigins = [
   'https://linkah.eu',
   'https://www.linkah.eu',
   'http://localhost:3000',
-  'http://127.0.0.1:3000'
+  'http://127.0.0.1:3000',
+  'https://linkah-frontend-3i4uq5o6n-marcos-projects-b325b3f0.vercel.app' // URL do seu log
 ];
-
-
 
 // ========================================
 // CORS
 // ========================================
-
 const corsOptions = {
   origin: function (origin, callback) {
-
     if (!origin) return callback(null, true);
-
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
-
     console.log('❌ CORS bloqueado:', origin);
     return callback(new Error(`CORS bloqueado para ${origin}`));
-
   },
   methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS'],
   credentials: true,
@@ -58,12 +49,9 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
-
-
 // ========================================
 // HELMET
 // ========================================
-
 app.use(
   helmet({
     contentSecurityPolicy: false,
@@ -72,17 +60,13 @@ app.use(
   })
 );
 
-
-
 // ========================================
 // WEBHOOK STRIPE
 // ========================================
-
 app.post(
   ['/api/pagamento/webhook','/api/pagamentos/webhook'],
   express.raw({ type: 'application/json' }),
   (req,res)=>{
-
     const webhookHandler =
       pagamentoController.ouvirStripe ||
       pagamentoController.webhookStripe;
@@ -93,65 +77,42 @@ app.post(
 
     console.error('❌ Webhook não configurado');
     return res.status(500).send('Webhook handler not configured');
-
   }
 );
-
-
 
 // ========================================
 // BODY PARSER
 // ========================================
-
 app.use(express.json({limit:'50mb'}));
 app.use(express.urlencoded({limit:'50mb',extended:true}));
-
-
 
 // ========================================
 // ARQUIVOS ESTÁTICOS
 // ========================================
-
 app.use('/uploads', express.static(path.join(__dirname,'uploads')));
-
-
 
 // ========================================
 // LOG DE REQUESTS
 // ========================================
-
 app.use((req,res,next)=>{
-
   console.log(
     `📡 [${new Date().toLocaleTimeString()}] ${req.method} ${req.url} | Origem: ${req.headers.origin || 'sem-origin'}`
   );
-
   next();
-
 });
-
-
 
 // ========================================
 // INICIALIZAÇÃO DO BANCO
 // ========================================
-
 const inicializarBanco = async () => {
-
   try {
-
     console.log('🔄 Verificando banco...');
-
     await db.query('SELECT NOW()');
 
-
-
     // ========================================
-    // TABELAS BASE
+    // TABELAS BASE (TODAS AS ORIGINAIS + PRESENCA)
     // ========================================
-
     await db.query(`
-
       CREATE TABLE IF NOT EXISTS public.usuarios (
         id SERIAL PRIMARY KEY,
         nome VARCHAR(255),
@@ -162,7 +123,6 @@ const inicializarBanco = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-
       CREATE TABLE IF NOT EXISTS public.produtores (
         email VARCHAR(255) PRIMARY KEY,
         nome VARCHAR(255) NOT NULL,
@@ -172,14 +132,12 @@ const inicializarBanco = async () => {
         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-
       CREATE TABLE IF NOT EXISTS public.eventos (
         id SERIAL PRIMARY KEY,
         produtor_email VARCHAR(255) REFERENCES public.produtores(email) ON DELETE CASCADE,
         nome VARCHAR(255) NOT NULL,
         status VARCHAR(50) DEFAULT 'Ativo'
       );
-
 
       CREATE TABLE IF NOT EXISTS public.compras (
         id SERIAL PRIMARY KEY,
@@ -190,7 +148,6 @@ const inicializarBanco = async () => {
         data_compra TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-
       CREATE TABLE IF NOT EXISTS public.ingressos (
         id SERIAL PRIMARY KEY,
         evento_id INTEGER REFERENCES public.eventos(id),
@@ -200,7 +157,6 @@ const inicializarBanco = async () => {
         data_emissao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-
       CREATE TABLE IF NOT EXISTS public.mensagens_v2 (
         id SERIAL PRIMARY KEY,
         comunidade_id INTEGER,
@@ -209,26 +165,28 @@ const inicializarBanco = async () => {
         data_envio TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS public.presenca (
+        id SERIAL PRIMARY KEY,
+        evento_id INTEGER,
+        usuario_nome VARCHAR(255),
+        usuario_foto TEXT,
+        ultima_vez TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(evento_id, usuario_nome)
+      );
     `);
-
-
 
     // ========================================
     // MIGRAÇÃO AUTOMÁTICA DE COLUNAS
     // ========================================
-
     const colunas = [
-
       // PRODUTORES
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS telefone VARCHAR(255)",
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS tipo VARCHAR(50)",
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS data_nascimento DATE",
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS cpf_cnpj VARCHAR(255)",
-
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS bio TEXT",
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS instagram VARCHAR(255)",
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS linkedin VARCHAR(255)",
-
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS cep VARCHAR(20)",
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS rua VARCHAR(255)",
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS numero VARCHAR(50)",
@@ -236,13 +194,12 @@ const inicializarBanco = async () => {
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS cidade VARCHAR(255)",
       "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS estado VARCHAR(255)",
 
-
       // USUARIOS
       "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS telefone VARCHAR(255)",
       "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS bio TEXT",
       "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS instagram VARCHAR(255)",
       "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS linkedin VARCHAR(255)",
-
+      "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS foto TEXT",
 
       // EVENTOS
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS descricao TEXT",
@@ -254,103 +211,72 @@ const inicializarBanco = async () => {
 
       // COMPRAS
       "ALTER TABLE public.compras ADD COLUMN IF NOT EXISTS valor_total DECIMAL(10,2)",
-      "ALTER TABLE public.compras ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255)"
+      "ALTER TABLE public.compras ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255)",
 
+      // MENSAGENS E PRESENÇA (FOTO)
+      "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS usuario_foto TEXT",
+      "ALTER TABLE public.presenca ADD COLUMN IF NOT EXISTS usuario_foto TEXT"
     ];
 
-
     for(const sql of colunas){
-
       try{
         await db.query(sql);
       }
       catch(err){
-
         if(!err.message.includes('already exists')){
           console.error('⚠️ erro coluna:',err.message);
         }
-
       }
-
     }
 
     console.log('✅ Banco sincronizado!');
-
   }
   catch(err){
-
     console.error('❌ ERRO BANCO:',err.message);
-
   }
-
 };
-
-
 
 // ========================================
 // ROTAS
 // ========================================
-
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
 app.use('/api/pagamento', pagamentoRoutes);
 app.use('/api/compras', compraRoutes);
 app.use('/api/comunidades', comunidadeRoutes);
 
-
-
 // ========================================
 // HEALTH CHECK
 // ========================================
-
 app.get('/ping',(req,res)=>{
-
   res.status(200).json({
     status:'Linkah API Online',
     timestamp:new Date()
   });
-
 });
-
-
 
 // ========================================
 // ERRO GLOBAL
 // ========================================
-
 app.use((err,req,res,next)=>{
-
   if(err){
-
     console.error('❌ ERRO GLOBAL:',err.message);
-
     if(err.message.includes('CORS')){
       return res.status(403).json({error:err.message});
     }
-
     return res.status(500).json({
       error:'Erro interno',
       details:err.message
     });
-
   }
-
   next();
-
 });
-
-
 
 // ========================================
 // START SERVER
 // ========================================
-
 const PORT = process.env.PORT || 3001;
-
 app.listen(PORT,'0.0.0.0',async ()=>{
-
   console.log(`🚀 Linkah API rodando na porta ${PORT}`);
-
   await inicializarBanco();
-
 });
