@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 
-// 📷 upload avatar (Cloudinary)
+// 📷 Importação correta desestruturada para o Cloudinary
 const { uploadAvatar } = require('../config/multer');
 
 
@@ -21,13 +21,13 @@ router.post('/login', authController.login);
 // 👤 GERENCIAMENTO DE PERFIL
 // -----------------------------
 
-// Buscar perfil
+// Buscar perfil (usado para preencher o formulário que editamos no front)
 router.get('/perfil', authController.getPerfil);
 
-// Atualizar perfil
+// Atualizar perfil (nome, bio, redes sociais, etc)
 router.put('/perfil', authController.updatePerfil);
 
-// 📷 Upload de foto de perfil
+// 📷 Upload de foto de perfil (Aqui o middleware uploadAvatar faz a mágica)
 router.post(
   '/upload-avatar',
   uploadAvatar.single('avatar'),

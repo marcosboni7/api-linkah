@@ -2,22 +2,25 @@ const express = require('express');
 const router = express.Router();
 const eventoController = require('../controllers/eventoController');
 const OnlineController = require('../controllers/OnlineController');
-const upload = require('../config/multer');
+
+// ✅ CORREÇÃO AQUI: Desestruturando para pegar o middleware específico de eventos
+const { uploadEvento } = require('../config/multer');
 
 // --- 1. ROTAS PÚBLICAS ---
 router.get('/', eventoController.listarTodosEventosParaVitrine);
 router.get('/vitrine', eventoController.listarTodosEventosParaVitrine);
 
 // --- 2. ROTAS DE CRIAÇÃO ---
-router.post('/novo-online', upload.single('imagem_capa'), OnlineController.criarEventoOnline);
-router.post('/novo-presencial', upload.single('imagem_capa'), eventoController.criarEventoPresencial);
+// Substituído 'upload' por 'uploadEvento' que é a instância correta do Multer
+router.post('/novo-online', uploadEvento.single('imagem_capa'), OnlineController.criarEventoOnline);
+router.post('/novo-presencial', uploadEvento.single('imagem_capa'), eventoController.criarEventoPresencial);
 
 // --- 3. DASHBOARD & BUSCA ---
 router.get('/listar', eventoController.listarEventosPorProdutor);
 router.get('/:id', eventoController.buscarEventoPorId);
 
 // --- 4. ROTA DE ATUALIZAÇÃO ---
-router.put('/:id', upload.single('imagem_capa'), eventoController.atualizarEvento);
+router.put('/:id', uploadEvento.single('imagem_capa'), eventoController.atualizarEvento);
 
 // --- 5. GESTÃO DE EVENTO ---
 router.delete('/:id', eventoController.excluirEvento);
