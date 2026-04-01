@@ -3,7 +3,6 @@ const db = require('../config/database');
 const { sendMail } = require('../config/mailer');
 
 // --- CONFIGURAÇÃO DO JWT ---
-// O ideal é definir JWT_SECRET nas variáveis de ambiente do Render
 const JWT_SECRET = process.env.JWT_SECRET || 'linkah_secret_fallback_2026';
 
 // --- 1. CADASTRO DE PRODUTOR ---
@@ -118,7 +117,7 @@ exports.login = async (req, res) => {
                 role: user.role || 'user' 
             },
             JWT_SECRET,
-            { expiresIn: '7d' } // Token válido por 7 dias
+            { expiresIn: '7d' } 
         );
 
         const perfilCompleto = !!(user.cpf_cnpj && user.cep && user.telefone);
@@ -127,7 +126,7 @@ exports.login = async (req, res) => {
 
         return res.status(200).json({ 
             message: "Login realizado!", 
-            token: token, // O Frontend (Next.js) precisa desse campo
+            token: token, 
             user: { 
                 id: user.id || null, 
                 nome: user.nome || 'Usuário', 
@@ -148,7 +147,7 @@ exports.login = async (req, res) => {
     }
 };
 
-// --- 3. BUSCAR PERFIL ---
+// --- 3. BUSCAR PERFIL (Privado/Logado) ---
 exports.getPerfil = async (req, res) => {
     console.log("👤 [DEPLOY LOG] Buscando perfil...");
     try {
@@ -171,18 +170,18 @@ exports.getPerfil = async (req, res) => {
 exports.updatePerfil = async (req, res) => {
     console.log("🆙 [DEPLOY LOG] Atualizando perfil...");
     try {
-        const { email_original, nome, cpf_cnpj, cep, rua, numero, bairro, estado, telefone, razao_social } = req.body;
+        const { email_original, nome, cpf_cnpj, cep, rua, numero, bairro, estado, telefone, razao_social, bio, instagram, linkedin } = req.body;
         const emailLower = email_original.toLowerCase();
 
         let updateResult = await db.query(
-            `UPDATE public.produtores SET nome=$1, cpf_cnpj=$2, cep=$3, rua=$4, numero=$5, bairro=$6, estado=$7, telefone=$8, razao_social=$9 WHERE LOWER(email)=$10`,
-            [nome, cpf_cnpj, cep, rua, numero, bairro, estado, telefone, razao_social, emailLower]
+            `UPDATE public.produtores SET nome=$1, cpf_cnpj=$2, cep=$3, rua=$4, numero=$5, bairro=$6, estado=$7, telefone=$8, razao_social=$9, bio=$10, instagram=$11, linkedin=$12 WHERE LOWER(email)=$13`,
+            [nome, cpf_cnpj, cep, rua, numero, bairro, estado, telefone, razao_social, bio, instagram, linkedin, emailLower]
         );
 
         if (updateResult.rowCount === 0) {
             await db.query(
-                `UPDATE public.usuarios SET nome=$1, telefone=$2 WHERE LOWER(email)=$3`,
-                [nome, telefone, emailLower]
+                `UPDATE public.usuarios SET nome=$1, telefone=$2, bio=$3, instagram=$4, linkedin=$5 WHERE LOWER(email)=$6`,
+                [nome, telefone, bio, instagram, linkedin, emailLower]
             );
         }
 
@@ -191,5 +190,42 @@ exports.updatePerfil = async (req, res) => {
     } catch (err) { 
         console.error("❌ [DEPLOY LOG] ERRO UPDATE:", err.message);
         return res.status(500).json({ message: "Erro ao atualizar perfil", debug: err.message }); 
+    }
+};
+
+// --- 5. BUSCAR PERFIL PÚBLICO (PARA O CHAT) ---
+// Esta é a função que o Modal de Perfil chama!
+exports.getPerfilPublico = async (req, res) => {
+    console.log("🔍 [DEPLOY LOG] Buscando perfil público para o chat...");
+    try {
+        const { nome } = req.query;
+
+        if (!nome) {
+            return res.status(400).json({ message: "Nome do usuário é obrigatório." });
+        }
+
+        // Busca dados limitados (segurança) em ambas as tabelas pelo nome
+        let result = await db.query(
+            'SELECT nome, bio, instagram, linkedin, role, status FROM public.produtores WHERE nome = $1', 
+            [nome]
+        );
+
+        if (result.rows.length === 0) {
+            result = await db.query(
+                'SELECT nome, bio, instagram, linkedin, role, status FROM public.usuarios WHERE nome = $1', 
+                [nome]
+            );
+        }
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Usuário não encontrado." });
+        }
+
+        console.log(`✅ [DEPLOY LOG] Perfil público de ${nome} encontrado.`);
+        return res.status(200).json(result.rows[0]);
+
+    } catch (err) {
+        console.error("❌ [DEPLOY LOG] ERRO GET PERFIL PUBLICO:", err.message);
+        return res.status(500).json({ message: "Erro ao buscar dados públicos", debug: err.message });
     }
 };

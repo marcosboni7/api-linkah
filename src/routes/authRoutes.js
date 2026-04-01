@@ -23,6 +23,10 @@ router.get('/perfil', authController.getPerfil);
 // Chama a função 'updatePerfil' no authController.js
 router.put('/perfil', authController.updatePerfil); 
 
+// Rota para o Modal do Chat (Público)
+// Busca apenas Nome, Bio e Redes Sociais pelo nome do usuário
+router.get('/perfil-publico', authController.getPerfilPublico);
+
 
 // --- 🛠️ MANUTENÇÃO (Opcional) ---
 
