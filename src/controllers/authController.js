@@ -195,9 +195,6 @@ exports.updatePerfil = async (req, res) => {
     }
 
     console.log(`🔎 [DEBUG] Atualizando: ${emailLower}`);
-    console.log('🔎 [DEBUG] Bio:', bio);
-    console.log('🔎 [DEBUG] Instagram:', instagram);
-    console.log('🔎 [DEBUG] Linkedin:', linkedin);
 
     // 1) tenta atualizar produtores
     let updateResult = await db.query(
@@ -217,7 +214,7 @@ exports.updatePerfil = async (req, res) => {
         instagram = $11,
         linkedin = $12
       WHERE LOWER(email) = $13
-      RETURNING id, nome, email, cpf_cnpj, cep, rua, numero, bairro, estado, telefone, razao_social, bio, instagram, linkedin, stripe_account_id, role, status
+      RETURNING *
       `,
       [
         nome,
@@ -249,7 +246,7 @@ exports.updatePerfil = async (req, res) => {
           instagram = $4,
           linkedin = $5
         WHERE LOWER(email) = $6
-        RETURNING id, nome, email, telefone, bio, instagram, linkedin, role, status
+        RETURNING *
         `,
         [nome, telefone, bio, instagram, linkedin, emailLower]
       );
@@ -263,9 +260,9 @@ exports.updatePerfil = async (req, res) => {
     }
 
     const updatedUser = updateResult.rows[0];
+    delete updatedUser.senha;
 
     console.log(`✅ [DEPLOY LOG] Perfil atualizado para: ${emailLower}`);
-    console.log('✅ [DEPLOY LOG] Dados retornados:', updatedUser);
 
     return res.status(200).json({
       message: 'Perfil atualizado com sucesso!',
@@ -293,13 +290,7 @@ exports.getPerfilPublico = async (req, res) => {
 
     let result = await db.query(
       `
-      SELECT
-        nome,
-        bio,
-        instagram,
-        linkedin,
-        role,
-        status
+      SELECT nome, bio, instagram, linkedin, role, status
       FROM public.produtores
       WHERE TRIM(LOWER(nome)) = TRIM(LOWER($1))
       LIMIT 1
@@ -310,13 +301,7 @@ exports.getPerfilPublico = async (req, res) => {
     if (result.rows.length === 0) {
       result = await db.query(
         `
-        SELECT
-          nome,
-          bio,
-          instagram,
-          linkedin,
-          role,
-          status
+        SELECT nome, bio, instagram, linkedin, role, status
         FROM public.usuarios
         WHERE TRIM(LOWER(nome)) = TRIM(LOWER($1))
         LIMIT 1
@@ -326,11 +311,9 @@ exports.getPerfilPublico = async (req, res) => {
     }
 
     if (result.rows.length === 0) {
-      console.log('⚠️ [PERFIL PÚBLICO] Usuário não encontrado:', nome);
       return res.status(404).json({ message: 'Usuário não encontrado.' });
     }
 
-    console.log('✅ [PERFIL PÚBLICO] Dados encontrados:', result.rows[0]);
     return res.status(200).json(result.rows[0]);
   } catch (err) {
     console.error('❌ [ERROR PERFIL PUBLICO]:', err.message);
