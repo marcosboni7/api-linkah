@@ -1,37 +1,47 @@
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const cloudinary = require('./cloudinary');
 
-// Garante que a pasta uploads exista, senão o multer quebra
-const uploadDir = path.join(__dirname, '../../uploads');
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
+// 🔥 Configuração do storage na Cloudinary
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: async (req, file) => {
+    return {
+      folder: 'linkah/eventos',
+      resource_type: 'image',
 
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, uploadDir); // Define a pasta de destino
-    },
-    filename: (req, file, cb) => {
-        // Gera um nome único: timestamp-numeroaleatorio.extensao
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, uniqueSuffix + path.extname(file.originalname).toLowerCase());
-    }
+      // 🔥 formatos permitidos
+      allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
+
+      // 🔥 otimização automática (TOP)
+      transformation: [
+        { quality: 'auto', fetch_format: 'auto' }
+      ],
+    };
+  },
 });
 
+// 🔥 filtro de arquivo (segurança)
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('❌ Tipo de arquivo não permitido'), false);
+  }
+};
+
+// 🔥 limite de tamanho (5MB)
+const limits = {
+  fileSize: 5 * 1024 * 1024,
+};
+
+// 🔥 export final
 const upload = multer({
-    storage: storage,
-    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-    fileFilter: (req, file, cb) => {
-        const filetypes = /jpeg|jpg|png|webp|gif/;
-        const mimetype = filetypes.test(file.mimetype);
-        const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
-        
-        if (mimetype && extname) {
-            return cb(null, true);
-        }
-        cb(new Error("Apenas imagens são permitidas (jpeg, jpg, png, webp, gif)"));
-    }
+  storage,
+  fileFilter,
+  limits,
 });
 
 module.exports = upload;
