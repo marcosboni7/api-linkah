@@ -2,28 +2,57 @@ const multer = require('multer');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('./cloudinary');
 
-// 🔥 Configuração do storage na Cloudinary
-const storage = new CloudinaryStorage({
+
+// =====================================
+// 📷 UPLOAD DE EVENTOS
+// =====================================
+
+const eventoStorage = new CloudinaryStorage({
   cloudinary,
-  params: async (req, file) => {
-    return {
-      folder: 'linkah/eventos',
-      resource_type: 'image',
+  params: async (req, file) => ({
+    folder: 'linkah/eventos',
+    resource_type: 'image',
 
-      // 🔥 formatos permitidos
-      allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
+    allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
 
-      // 🔥 otimização automática (TOP)
-      transformation: [
-        { quality: 'auto', fetch_format: 'auto' }
-      ],
-    };
-  },
+    transformation: [
+      { quality: 'auto', fetch_format: 'auto' },
+      { width: 1200, height: 800, crop: 'limit' }
+    ]
+  }),
 });
 
-// 🔥 filtro de arquivo (segurança)
+
+// =====================================
+// 👤 UPLOAD DE AVATAR
+// =====================================
+
+const avatarStorage = new CloudinaryStorage({
+  cloudinary,
+  params: async (req, file) => ({
+    folder: 'linkah/avatars',
+    resource_type: 'image',
+
+    allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
+
+    transformation: [
+      { width: 400, height: 400, crop: 'fill', gravity: 'face' },
+      { quality: 'auto', fetch_format: 'auto' }
+    ]
+  }),
+});
+
+
+// =====================================
+// 🔒 FILTRO DE SEGURANÇA
+// =====================================
+
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+  const allowedTypes = [
+    'image/jpeg',
+    'image/png',
+    'image/webp'
+  ];
 
   if (allowedTypes.includes(file.mimetype)) {
     cb(null, true);
@@ -32,16 +61,33 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// 🔥 limite de tamanho (5MB)
+
+// =====================================
+// 📦 LIMITES
+// =====================================
+
 const limits = {
-  fileSize: 5 * 1024 * 1024,
+  fileSize: 5 * 1024 * 1024 // 5MB
 };
 
-// 🔥 export final
-const upload = multer({
-  storage,
+
+// =====================================
+// 🚀 EXPORTS
+// =====================================
+
+const uploadEvento = multer({
+  storage: eventoStorage,
   fileFilter,
   limits,
 });
 
-module.exports = upload;
+const uploadAvatar = multer({
+  storage: avatarStorage,
+  fileFilter,
+  limits,
+});
+
+module.exports = {
+  uploadEvento,
+  uploadAvatar
+};

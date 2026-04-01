@@ -195,7 +195,6 @@ exports.getPerfil = async (req, res) => {
 // -----------------------------
 exports.updatePerfil = async (req, res) => {
   console.log('🆙 [UPDATE PERFIL]');
-  console.log("BODY RECEBIDO:", req.body);
 
   try {
 
@@ -223,7 +222,6 @@ exports.updatePerfil = async (req, res) => {
       });
     }
 
-    // tenta atualizar produtores
     let result = await db.query(
       `
       UPDATE public.produtores
@@ -260,7 +258,6 @@ exports.updatePerfil = async (req, res) => {
       ]
     );
 
-    // fallback usuarios
     if (result.rowCount === 0) {
 
       result = await db.query(
@@ -295,8 +292,6 @@ exports.updatePerfil = async (req, res) => {
     const user = result.rows[0];
     delete user.senha;
 
-    console.log('✅ PERFIL ATUALIZADO');
-
     return res.status(200).json({
       message: 'Perfil atualizado com sucesso!',
       user
@@ -312,7 +307,72 @@ exports.updatePerfil = async (req, res) => {
 
 
 // -----------------------------
-// 5️⃣ PERFIL PUBLICO
+// 5️⃣ UPLOAD AVATAR
+// -----------------------------
+exports.uploadAvatar = async (req, res) => {
+
+  console.log("📷 [UPLOAD AVATAR]");
+
+  try {
+
+    const email = (req.body.email || '').trim().toLowerCase();
+
+    if (!req.file) {
+      return res.status(400).json({
+        message: "Nenhuma imagem enviada"
+      });
+    }
+
+    const avatarUrl = req.file.path;
+
+    let result = await db.query(
+      `
+      UPDATE public.produtores
+      SET avatar=$1
+      WHERE LOWER(email)=$2
+      RETURNING *
+      `,
+      [avatarUrl, email]
+    );
+
+    if (result.rowCount === 0) {
+
+      result = await db.query(
+        `
+        UPDATE public.usuarios
+        SET avatar=$1
+        WHERE LOWER(email)=$2
+        RETURNING *
+        `,
+        [avatarUrl, email]
+      );
+    }
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        message: "Usuário não encontrado"
+      });
+    }
+
+    return res.status(200).json({
+      message: "Avatar atualizado com sucesso!",
+      avatar: avatarUrl
+    });
+
+  } catch (err) {
+
+    console.error("❌ ERRO AVATAR:", err);
+
+    return res.status(500).json({
+      message: "Erro ao enviar avatar"
+    });
+
+  }
+};
+
+
+// -----------------------------
+// 6️⃣ PERFIL PUBLICO
 // -----------------------------
 exports.getPerfilPublico = async (req, res) => {
 
@@ -328,7 +388,7 @@ exports.getPerfilPublico = async (req, res) => {
 
     let result = await db.query(
       `
-      SELECT nome,bio,instagram,linkedin,role,status
+      SELECT nome,bio,instagram,linkedin,avatar,role,status
       FROM public.produtores
       WHERE TRIM(LOWER(nome)) = TRIM(LOWER($1))
       LIMIT 1
@@ -340,7 +400,7 @@ exports.getPerfilPublico = async (req, res) => {
 
       result = await db.query(
         `
-        SELECT nome,bio,instagram,linkedin,role,status
+        SELECT nome,bio,instagram,linkedin,avatar,role,status
         FROM public.usuarios
         WHERE TRIM(LOWER(nome)) = TRIM(LOWER($1))
         LIMIT 1
