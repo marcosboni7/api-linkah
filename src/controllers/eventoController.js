@@ -1,7 +1,7 @@
 const db = require('../config/database');
-const { OpenAI } = require("openai"); // Adicionado
+const { OpenAI } = require("openai"); // Adicionado para IA
 
-// Configuração da IA (Certifique-se de ter a chave no seu .env)
+// Configuração da IA (Pega a chave das variáveis de ambiente)
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const CATEGORIAS_VALIDAS = [
@@ -13,6 +13,10 @@ const CATEGORIAS_VALIDAS = [
   'Experiências & Lifestyle',
   'Família & Comunidade'
 ];
+
+// ========================================
+// SUAS FUNÇÕES DE LIMPEZA E NORMALIZAÇÃO (MANTIDAS)
+// ========================================
 
 const limparCampo = (valor, fallback = '') => {
   if (
@@ -142,7 +146,9 @@ const obterImagemFinal = (req, campo, imagemAtual = null) => {
   return imagemFinal;
 };
 
+// ========================================
 // 1. LISTAR VITRINE
+// ========================================
 exports.listarTodosEventosParaVitrine = async (req, res) => {
   try {
     const query = `
@@ -183,7 +189,9 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
   }
 };
 
+// ========================================
 // 2. LISTAR POR PRODUTOR
+// ========================================
 exports.listarEventosPorProdutor = async (req, res) => {
   const { email } = req.query;
   if (!email) return res.status(400).json({ error: 'Email não fornecido' });
@@ -218,7 +226,9 @@ exports.listarEventosPorProdutor = async (req, res) => {
   }
 };
 
+// ========================================
 // 3. BUSCAR POR ID
+// ========================================
 exports.buscarEventoPorId = async (req, res) => {
   const { id } = req.params;
 
@@ -269,7 +279,9 @@ exports.buscarEventoPorId = async (req, res) => {
   }
 };
 
+// ========================================
 // 4. CRIAR PRESENCIAL
+// ========================================
 exports.criarEventoPresencial = async (req, res) => {
   const imagemFinal = obterImagemFinal(req, 'imagem_capa');
   const bannerFinal = obterImagemFinal(req, 'banner_patrocinio');
@@ -346,73 +358,9 @@ exports.criarEventoPresencial = async (req, res) => {
   }
 };
 
-// 5. CRIAR ONLINE
-exports.criarEventoOnline = async (req, res) => {
-  const imagemFinal = obterImagemFinal(req, 'imagem_capa');
-  const bannerFinal = obterImagemFinal(req, 'banner_patrocinio');
-
-  const {
-    nome,
-    produtor_email,
-    usuario_nome,
-    categoria,
-    descricao,
-    data_inicio,
-    hora_inicio,
-    data_termino,
-    hora_termino,
-    capacidade,
-    moeda,
-    tipo,
-    regras,
-    visibilidade,
-    link_reuniao,
-    local_nome
-  } = req.body;
-
-  try {
-    const query = `
-      INSERT INTO public.eventos (
-        nome, produtor_email, usuario_nome, categoria, descricao, data_inicio, hora_inicio,
-        data_termino, hora_termino, local_nome, capacidade, imagem_capa, banner_patrocinio, tipo,
-        status, moeda, regras, visibilidade, link_reuniao
-      )
-      VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
-      )
-      RETURNING id
-    `;
-
-    const values = [
-      limparCampo(nome, 'Novo Evento Online'),
-      normalizarEmail(produtor_email),
-      limparCampo(usuario_nome, 'Admin'),
-      normalizarCategoria(categoria),
-      limparCampo(descricao, ''),
-      normalizarData(data_inicio),
-      normalizarHora(hora_inicio),
-      normalizarData(data_termino),
-      normalizarHora(hora_termino),
-      limparCampo(local_nome, 'Online'),
-      limparNumero(capacidade, 0),
-      imagemFinal,
-      bannerFinal,
-      limparCampo(tipo, 'Online'),
-      'Ativo',
-      limparCampo(moeda, 'BRL'),
-      limparCampo(regras, ''),
-      limparCampo(visibilidade, 'Publico'),
-      limparCampo(link_reuniao, '')
-    ];
-
-    const result = await db.query(query, values);
-    return res.status(201).json({ message: 'Evento online criado!', id: result.rows[0].id });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-};
-
-// 6. ATUALIZAR EVENTO
+// ========================================
+// 5. ATUALIZAR EVENTO
+// ========================================
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
 
@@ -504,7 +452,9 @@ exports.atualizarEvento = async (req, res) => {
   }
 };
 
-// 7. EXCLUIR EVENTO
+// ========================================
+// 6. EXCLUIR EVENTO
+// ========================================
 exports.excluirEvento = async (req, res) => {
   const { id } = req.params;
 
@@ -517,7 +467,9 @@ exports.excluirEvento = async (req, res) => {
   }
 };
 
-// 8. SALVAR INGRESSOS
+// ========================================
+// 7. SALVAR INGRESSOS
+// ========================================
 exports.salvarIngressos = async (req, res) => {
   const { id } = req.params;
   const { ingressos, moeda_evento } = req.body;
@@ -556,7 +508,9 @@ exports.salvarIngressos = async (req, res) => {
   }
 };
 
-// 9. ATUALIZAR STATUS
+// ========================================
+// 8. ATUALIZAR STATUS
+// ========================================
 exports.atualizarStatus = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
@@ -569,11 +523,10 @@ exports.atualizarStatus = async (req, res) => {
   }
 };
 
-/**
- * 10. GERAR EVENTO COM IA (NOVO)
- * Extrai informações de um texto bruto e retorna um objeto de evento estruturado.
- */
-exports.gerarEventoComIA = async (req, res) => {
+// ========================================
+// 9. GERAR COM IA (✨ Mágica Adicionada)
+// ========================================
+exports.gerarComIA = async (req, res) => {
   const { textoBruto } = req.body;
 
   if (!textoBruto) {
@@ -584,10 +537,11 @@ exports.gerarEventoComIA = async (req, res) => {
     const prompt = `
       Você é um assistente de cadastro de eventos para a plataforma Linkah.
       Analise o texto abaixo e extraia as informações para preencher um formulário de evento.
+      Considere que hoje é ${new Date().toLocaleDateString('pt-BR')}.
       
       Categorias permitidas: ${CATEGORIAS_VALIDAS.join(', ')}.
       
-      Retorne APENAS um objeto JSON válido (sem markdown) com os seguintes campos:
+      Retorne APENAS um objeto JSON válido com os seguintes campos:
       - nome: (String)
       - categoria: (String - Deve ser uma das permitidas)
       - descricao: (String - Resumo chamativo)
@@ -606,27 +560,27 @@ exports.gerarEventoComIA = async (req, res) => {
     `;
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o", // Ou "gpt-3.5-turbo" se preferir custo menor
+      model: "gpt-4o",
       messages: [{ role: "system", content: prompt }],
       response_format: { type: "json_object" }
     });
 
-    const eventoIA = JSON.parse(response.choices[0].message.content);
+    const data = JSON.parse(response.choices[0].message.content);
 
-    // Normalizar os dados retornados pela IA usando suas funções existentes
-    const eventoFormatado = {
-      ...eventoIA,
-      categoria: normalizarCategoria(eventoIA.categoria),
-      data_inicio: normalizarData(eventoIA.data_inicio),
-      hora_inicio: normalizarHora(eventoIA.hora_inicio),
-      data_termino: normalizarData(eventoIA.data_termino),
-      hora_termino: normalizarHora(eventoIA.hora_termino),
-      capacidade: limparNumero(eventoIA.capacidade, 0)
+    // Normalizando o retorno da IA com as suas funções originais
+    const formatado = {
+      ...data,
+      categoria: normalizarCategoria(data.categoria),
+      data_inicio: normalizarData(data.data_inicio),
+      hora_inicio: normalizarHora(data.hora_inicio),
+      data_termino: normalizarData(data.data_termino),
+      hora_termino: normalizarHora(data.hora_termino),
+      capacidade: limparNumero(data.capacidade, 0)
     };
 
-    return res.status(200).json(eventoFormatado);
+    return res.status(200).json(formatado);
   } catch (err) {
     console.error('❌ Erro na IA:', err.message);
-    return res.status(500).json({ error: 'Erro ao processar texto com IA.' });
+    return res.status(500).json({ error: 'Falha ao processar texto com IA.' });
   }
 };
