@@ -1,8 +1,8 @@
 const db = require('../config/database');
-const { OpenAI } = require("openai"); // Adicionado para IA
+const Groq = require("groq-sdk"); // Mudado de OpenAI para Groq (Grátis)
 
-// Configuração da IA (Pega a chave das variáveis de ambiente)
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Configuração da IA com a sua chave do Groq
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const CATEGORIAS_VALIDAS = [
   'Arte & Cultura',
@@ -524,7 +524,7 @@ exports.atualizarStatus = async (req, res) => {
 };
 
 // ========================================
-// 9. GERAR COM IA (✨ Mágica Adicionada)
+// 9. GERAR COM IA (✨ Mágica com Groq Grátis)
 // ========================================
 exports.gerarComIA = async (req, res) => {
   const { textoBruto } = req.body;
@@ -534,38 +534,28 @@ exports.gerarComIA = async (req, res) => {
   }
 
   try {
-    const prompt = `
-      Você é um assistente de cadastro de eventos para a plataforma Linkah.
-      Analise o texto abaixo e extraia as informações para preencher um formulário de evento.
-      Considere que hoje é ${new Date().toLocaleDateString('pt-BR')}.
-      
-      Categorias permitidas: ${CATEGORIAS_VALIDAS.join(', ')}.
-      
-      Retorne APENAS um objeto JSON válido com os seguintes campos:
-      - nome: (String)
-      - categoria: (String - Deve ser uma das permitidas)
-      - descricao: (String - Resumo chamativo)
-      - data_inicio: (String no formato YYYY-MM-DD)
-      - hora_inicio: (String no formato HH:MM)
-      - data_termino: (String no formato YYYY-MM-DD ou null)
-      - hora_termino: (String no formato HH:MM ou null)
-      - local_nome: (String)
-      - cidade: (String)
-      - estado: (String - Sigla UF)
-      - cep: (String)
-      - capacidade: (Number)
-      - preco_sugerido: (Number - Preço base extraído do texto)
-
-      Texto para análise: "${textoBruto}"
-    `;
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [{ role: "system", content: prompt }],
-      response_format: { type: "json_object" }
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: `Você é um assistente de cadastro de eventos para a plataforma Linkah.
+          Analise o texto e extraia as informações para um formulário.
+          Hoje é ${new Date().toLocaleDateString('pt-BR')}.
+          Categorias permitidas: ${CATEGORIAS_VALIDAS.join(', ')}.
+          
+          Retorne APENAS um JSON puro com os campos:
+          nome, categoria, descricao, data_inicio (YYYY-MM-DD), hora_inicio (HH:MM), data_termino (YYYY-MM-DD ou null), hora_termino (HH:MM ou null), local_nome, cidade, estado (Sigla UF), cep, capacidade (Number), preco_sugerido (Number).`
+        },
+        {
+          role: "user",
+          content: textoBruto,
+        },
+      ],
+      model: "llama-3.3-70b-versatile",
+      response_format: { type: "json_object" },
     });
 
-    const data = JSON.parse(response.choices[0].message.content);
+    const data = JSON.parse(chatCompletion.choices[0].message.content);
 
     // Normalizando o retorno da IA com as suas funções originais
     const formatado = {
@@ -580,7 +570,7 @@ exports.gerarComIA = async (req, res) => {
 
     return res.status(200).json(formatado);
   } catch (err) {
-    console.error('❌ Erro na IA:', err.message);
-    return res.status(500).json({ error: 'Falha ao processar texto com IA.' });
+    console.error('❌ Erro na IA Groq:', err.message);
+    return res.status(500).json({ error: 'Falha ao processar texto com IA gratuita.' });
   }
 };
