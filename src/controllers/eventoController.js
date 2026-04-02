@@ -527,9 +527,10 @@ exports.atualizarStatus = async (req, res) => {
 // 9. GERAR COM IA (✨ Mágica com Groq Grátis)
 // ========================================
 exports.gerarComIA = async (req, res) => {
-  const { textoBruto } = req.body;
+  // AJUSTADO: Agora recebe 'texto' para bater com o JSON.stringify({ texto: text }) do Front-end
+  const { texto } = req.body; 
 
-  if (!textoBruto) {
+  if (!texto) {
     return res.status(400).json({ error: 'Forneça um texto para a IA processar.' });
   }
 
@@ -548,7 +549,7 @@ exports.gerarComIA = async (req, res) => {
         },
         {
           role: "user",
-          content: textoBruto,
+          content: texto,
         },
       ],
       model: "llama-3.3-70b-versatile",
