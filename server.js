@@ -18,31 +18,36 @@ const app = express();
 app.set('trust proxy', 1);
 
 // ========================================
-// ORIGENS PERMITIDAS (CORS ATUALIZADO)
+// CONFIGURAÇÃO DE ORIGENS (CORS)
 // ========================================
 const allowedOrigins = [
   'https://linkah.eu',
   'https://www.linkah.eu',
   'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'https://linkah-frontend-3i4uq5o6n-marcos-projects-b325b3f0.vercel.app'
+  'http://127.0.0.1:3000'
 ];
 
-// ========================================
-// CORS
-// ========================================
 const corsOptions = {
   origin: function (origin, callback) {
+    // Permite requests sem origin (como mobile apps ou curl)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
+
+    // Checa se está na lista fixa
+    const isAllowed = allowedOrigins.includes(origin);
+    
+    // Checa se é um preview da Vercel (Regex para aceitar subdomínios da Vercel do seu projeto)
+    const isVercelPreview = origin.includes('vercel.app') && origin.includes('linkah');
+
+    if (isAllowed || isVercelPreview) {
       return callback(null, true);
     }
-    console.log('❌ CORS bloqueado:', origin);
+
+    console.log('❌ CORS bloqueado para:', origin);
     return callback(new Error(`CORS bloqueado para ${origin}`));
   },
-  methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   credentials: true,
-  allowedHeaders: ['Content-Type','Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   optionsSuccessStatus: 204
 };
 
@@ -50,7 +55,7 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
 // ========================================
-// HELMET
+// HELMET (Segurança de Headers)
 // ========================================
 app.use(
   helmet({
@@ -61,40 +66,36 @@ app.use(
 );
 
 // ========================================
-// WEBHOOK STRIPE
+// WEBHOOK STRIPE (Precisa vir ANTES do express.json)
 // ========================================
 app.post(
-  ['/api/pagamento/webhook','/api/pagamentos/webhook'],
+  ['/api/pagamento/webhook', '/api/pagamentos/webhook'],
   express.raw({ type: 'application/json' }),
-  (req,res)=>{
-    const webhookHandler =
-      pagamentoController.ouvirStripe ||
-      pagamentoController.webhookStripe;
-
-    if(typeof webhookHandler === 'function'){
-      return webhookHandler(req,res);
+  (req, res) => {
+    const webhookHandler = pagamentoController.ouvirStripe || pagamentoController.webhookStripe;
+    if (typeof webhookHandler === 'function') {
+      return webhookHandler(req, res);
     }
-
-    console.error('❌ Webhook não configurado');
+    console.error('❌ Webhook não configurado no Controller');
     return res.status(500).send('Webhook handler not configured');
   }
 );
 
 // ========================================
-// BODY PARSER
+// PARSERS
 // ========================================
-app.use(express.json({limit:'50mb'}));
-app.use(express.urlencoded({limit:'50mb',extended:true}));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // ========================================
 // ARQUIVOS ESTÁTICOS
 // ========================================
-app.use('/uploads', express.static(path.join(__dirname,'uploads')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ========================================
-// LOG DE REQUESTS
+// MIDDLEWARE DE LOG DE ACESSOS
 // ========================================
-app.use((req,res,next)=>{
+app.use((req, res, next) => {
   console.log(
     `📡 [${new Date().toLocaleTimeString()}] ${req.method} ${req.url} | Origem: ${req.headers.origin || 'sem-origin'}`
   );
@@ -102,16 +103,14 @@ app.use((req,res,next)=>{
 });
 
 // ========================================
-// INICIALIZAÇÃO DO BANCO
+// SYNC DO BANCO DE DADOS
 // ========================================
 const inicializarBanco = async () => {
   try {
-    console.log('🔄 Verificando banco...');
+    console.log('🔄 Sincronizando tabelas e colunas...');
     await db.query('SELECT NOW()');
 
-    // ========================================
-    // TABELAS BASE (ESTRUTURA ATUALIZADA)
-    // ========================================
+    // Criação das tabelas base
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.usuarios (
         id SERIAL PRIMARY KEY,
@@ -138,123 +137,54 @@ const inicializarBanco = async () => {
         nome VARCHAR(255) NOT NULL,
         status VARCHAR(50) DEFAULT 'Ativo'
       );
-
-      CREATE TABLE IF NOT EXISTS public.compras (
-        id SERIAL PRIMARY KEY,
-        usuario_email VARCHAR(255),
-        evento_id INTEGER REFERENCES public.eventos(id),
-        quantidade INTEGER,
-        status VARCHAR(50),
-        data_compra TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS public.ingressos (
-        id SERIAL PRIMARY KEY,
-        evento_id INTEGER REFERENCES public.eventos(id),
-        usuario_email VARCHAR(255),
-        codigo_ingresso VARCHAR(100) UNIQUE,
-        status VARCHAR(50) DEFAULT 'Ativo',
-        data_emissao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS public.mensagens_v2 (
-        id SERIAL PRIMARY KEY,
-        evento_id INTEGER,
-        usuario_nome VARCHAR(255),
-        usuario_foto TEXT,
-        texto TEXT,
-        imagem TEXT,
-        tipo VARCHAR(50) DEFAULT 'chat',
-        status VARCHAR(10) DEFAULT '✨',
-        is_host BOOLEAN DEFAULT false,
-        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS public.presenca (
-        id SERIAL PRIMARY KEY,
-        evento_id INTEGER,
-        usuario_nome VARCHAR(255),
-        usuario_foto TEXT,
-        status VARCHAR(10) DEFAULT '✨',
-        ultima_vez TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(evento_id, usuario_nome)
-      );
     `);
 
-    // ========================================
-    // MIGRAÇÃO AUTOMÁTICA DE COLUNAS
-    // ========================================
-    const colunas = [
-      // PRODUTORES
-      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS telefone VARCHAR(255)",
-      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS tipo VARCHAR(50)",
-      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS data_nascimento DATE",
-      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS cpf_cnpj VARCHAR(255)",
-      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS bio TEXT",
-      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS instagram VARCHAR(255)",
-      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS linkedin VARCHAR(255)",
-      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS cep VARCHAR(20)",
-      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS rua VARCHAR(255)",
-      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS numero VARCHAR(50)",
-      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS bairro VARCHAR(255)",
-      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS cidade VARCHAR(255)",
-      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS estado VARCHAR(255)",
-
-      // USUARIOS
-      "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS telefone VARCHAR(255)",
-      "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS bio TEXT",
-      "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS instagram VARCHAR(255)",
-      "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS linkedin VARCHAR(255)",
-      "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS foto TEXT",
-
-      // EVENTOS
+    // Migrações Automáticas (Colunas Adicionais)
+    const migrations = [
+      // Eventos (Suporte para Presencial e Banner de Patrocínio)
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS descricao TEXT",
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS preco DECIMAL(10,2) DEFAULT 0",
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS imagem_capa TEXT",
+      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS banner_patrocinio TEXT", // NOVO CAMPO
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS categoria VARCHAR(100)",
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS data_inicio DATE",
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS hora_inicio TIME",
-      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS usuario_nome VARCHAR(255)", // Para lógica de Host
-
-      // COMPRAS
-      "ALTER TABLE public.compras ADD COLUMN IF NOT EXISTS valor_total DECIMAL(10,2)",
-      "ALTER TABLE public.compras ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255)",
-
-      // MENSAGENS V2 - Garantindo colunas do novo chat
-      "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS evento_id INTEGER",
-      "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS usuario_foto TEXT",
-      "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS texto TEXT",
-      "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS imagem TEXT",
-      "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS tipo VARCHAR(50) DEFAULT 'chat'",
-      "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS status VARCHAR(10) DEFAULT '✨'",
-      "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS is_host BOOLEAN DEFAULT false",
-      "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-
-      // PRESENCA - Garantindo colunas do novo online
-      "ALTER TABLE public.presenca ADD COLUMN IF NOT EXISTS usuario_foto TEXT",
-      "ALTER TABLE public.presenca ADD COLUMN IF NOT EXISTS status VARCHAR(10) DEFAULT '✨'"
+      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS data_termino DATE",
+      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS hora_termino TIME",
+      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS tipo VARCHAR(50) DEFAULT 'Presencial'",
+      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS local_nome VARCHAR(255)",
+      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS cep VARCHAR(20)",
+      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS endereco VARCHAR(255)",
+      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS numero VARCHAR(50)",
+      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS cidade VARCHAR(255)",
+      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS estado VARCHAR(10)",
+      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS capacidade INTEGER",
+      
+      // Produtores
+      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS cpf_cnpj VARCHAR(255)",
+      "ALTER TABLE public.produtores ADD COLUMN IF NOT EXISTS bio TEXT",
+      
+      // Usuarios
+      "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS foto TEXT",
+      "ALTER TABLE public.usuarios ADD COLUMN IF NOT EXISTS bio TEXT"
     ];
 
-    for(const sql of colunas){
-      try{
+    for (const sql of migrations) {
+      try {
         await db.query(sql);
-      }
-      catch(err){
-        if(!err.message.includes('already exists')){
-          console.error('⚠️ erro coluna:',err.message);
-        }
+      } catch (err) {
+        // Ignora erro se a coluna já existir
       }
     }
 
-    console.log('✅ Banco sincronizado!');
-  }
-  catch(err){
-    console.error('❌ ERRO BANCO:',err.message);
+    console.log('✅ Estrutura do Banco de Dados pronta!');
+  } catch (err) {
+    console.error('❌ Erro Crítico no Banco:', err.message);
   }
 };
 
 // ========================================
-// ROTAS
+// ROTAS DA API
 // ========================================
 app.use('/api/auth', authRoutes);
 app.use('/api/eventos', eventoRoutes);
@@ -262,38 +192,35 @@ app.use('/api/pagamento', pagamentoRoutes);
 app.use('/api/compras', compraRoutes);
 app.use('/api/comunidades', comunidadeRoutes);
 
+// Health Check
+app.get('/ping', (req, res) => {
+  res.status(200).json({ status: 'Linkah API Online', timestamp: new Date() });
+});
+
 // ========================================
-// HEALTH CHECK
+// TRATAMENTO DE ERROS GLOBAIS
 // ========================================
-app.get('/ping',(req,res)=>{
-  res.status(200).json({
-    status:'Linkah API Online',
-    timestamp:new Date()
+app.use((err, req, res, next) => {
+  console.error('❌ ERRO DETECTADO:', err.message);
+  
+  if (err.message.includes('CORS')) {
+    return res.status(403).json({ 
+      error: 'CORS Error', 
+      message: 'Origem não permitida pela Linkah API' 
+    });
+  }
+
+  res.status(500).json({
+    error: 'Internal Server Error',
+    details: process.env.NODE_ENV === 'development' ? err.message : 'Consulte o suporte'
   });
 });
 
 // ========================================
-// ERRO GLOBAL
-// ========================================
-app.use((err,req,res,next)=>{
-  if(err){
-    console.error('❌ ERRO GLOBAL:',err.message);
-    if(err.message.includes('CORS')){
-      return res.status(403).json({error:err.message});
-    }
-    return res.status(500).json({
-      error:'Erro interno',
-      details:err.message
-    });
-  }
-  next();
-});
-
-// ========================================
-// START SERVER
+// INICIALIZAÇÃO
 // ========================================
 const PORT = process.env.PORT || 3001;
-app.listen(PORT,'0.0.0.0',async ()=>{
-  console.log(`🚀 Linkah API rodando na porta ${PORT}`);
+app.listen(PORT, '0.0.0.0', async () => {
+  console.log(`🚀 Linkah API em órbita na porta ${PORT}`);
   await inicializarBanco();
 });

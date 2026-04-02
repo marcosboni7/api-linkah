@@ -1,4 +1,8 @@
 const db = require('../config/database');
+const { OpenAI } = require("openai"); // Adicionado
+
+// Configuração da IA (Certifique-se de ter a chave no seu .env)
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const CATEGORIAS_VALIDAS = [
   'Arte & Cultura',
@@ -114,17 +118,13 @@ const normalizarHora = (valor) => {
   return hora.substring(0, 8);
 };
 
-/** * AJUSTE: Função agora lida com múltiplos campos de imagem (capa e banner)
- */
 const obterImagemFinal = (req, campo, imagemAtual = null) => {
   let imagemFinal = imagemAtual;
 
-  // Se o multer salvou arquivos (req.files existe em upload.fields)
   if (req.files && req.files[campo]) {
     const file = req.files[campo][0];
     imagemFinal = file.path || file.secure_url || file.url || imagemAtual;
   } 
-  // Caso venha apenas a string via body (URL direta)
   else if (req.body[campo]) {
     const imgBody = req.body[campo];
     const isLixo =
@@ -566,5 +566,67 @@ exports.atualizarStatus = async (req, res) => {
     return res.status(200).json({ message: 'Status OK' });
   } catch (err) {
     return res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * 10. GERAR EVENTO COM IA (NOVO)
+ * Extrai informações de um texto bruto e retorna um objeto de evento estruturado.
+ */
+exports.gerarEventoComIA = async (req, res) => {
+  const { textoBruto } = req.body;
+
+  if (!textoBruto) {
+    return res.status(400).json({ error: 'Forneça um texto para a IA processar.' });
+  }
+
+  try {
+    const prompt = `
+      Você é um assistente de cadastro de eventos para a plataforma Linkah.
+      Analise o texto abaixo e extraia as informações para preencher um formulário de evento.
+      
+      Categorias permitidas: ${CATEGORIAS_VALIDAS.join(', ')}.
+      
+      Retorne APENAS um objeto JSON válido (sem markdown) com os seguintes campos:
+      - nome: (String)
+      - categoria: (String - Deve ser uma das permitidas)
+      - descricao: (String - Resumo chamativo)
+      - data_inicio: (String no formato YYYY-MM-DD)
+      - hora_inicio: (String no formato HH:MM)
+      - data_termino: (String no formato YYYY-MM-DD ou null)
+      - hora_termino: (String no formato HH:MM ou null)
+      - local_nome: (String)
+      - cidade: (String)
+      - estado: (String - Sigla UF)
+      - cep: (String)
+      - capacidade: (Number)
+      - preco_sugerido: (Number - Preço base extraído do texto)
+
+      Texto para análise: "${textoBruto}"
+    `;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o", // Ou "gpt-3.5-turbo" se preferir custo menor
+      messages: [{ role: "system", content: prompt }],
+      response_format: { type: "json_object" }
+    });
+
+    const eventoIA = JSON.parse(response.choices[0].message.content);
+
+    // Normalizar os dados retornados pela IA usando suas funções existentes
+    const eventoFormatado = {
+      ...eventoIA,
+      categoria: normalizarCategoria(eventoIA.categoria),
+      data_inicio: normalizarData(eventoIA.data_inicio),
+      hora_inicio: normalizarHora(eventoIA.hora_inicio),
+      data_termino: normalizarData(eventoIA.data_termino),
+      hora_termino: normalizarHora(eventoIA.hora_termino),
+      capacidade: limparNumero(eventoIA.capacidade, 0)
+    };
+
+    return res.status(200).json(eventoFormatado);
+  } catch (err) {
+    console.error('❌ Erro na IA:', err.message);
+    return res.status(500).json({ error: 'Erro ao processar texto com IA.' });
   }
 };
