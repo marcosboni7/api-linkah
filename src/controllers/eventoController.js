@@ -114,18 +114,19 @@ const normalizarHora = (valor) => {
   return hora.substring(0, 8);
 };
 
-const obterImagemFinal = (req, imagemAtual = null) => {
+/** * AJUSTE: Função agora lida com múltiplos campos de imagem (capa e banner)
+ */
+const obterImagemFinal = (req, campo, imagemAtual = null) => {
   let imagemFinal = imagemAtual;
 
-  if (req.file) {
-    imagemFinal =
-      req.file.path ||
-      req.file.secure_url ||
-      req.file.url ||
-      imagemAtual;
-  } else if (req.body.imagem_capa) {
-    const imgBody = req.body.imagem_capa;
-
+  // Se o multer salvou arquivos (req.files existe em upload.fields)
+  if (req.files && req.files[campo]) {
+    const file = req.files[campo][0];
+    imagemFinal = file.path || file.secure_url || file.url || imagemAtual;
+  } 
+  // Caso venha apenas a string via body (URL direta)
+  else if (req.body[campo]) {
+    const imgBody = req.body[campo];
     const isLixo =
       !imgBody ||
       imgBody === 'undefined' ||
@@ -201,6 +202,10 @@ exports.listarEventosPorProdutor = async (req, res) => {
           WHEN imagem_capa ILIKE '%undefined%' OR imagem_capa ILIKE '%null%' THEN NULL
           ELSE imagem_capa
         END AS imagem_capa,
+        CASE
+          WHEN banner_patrocinio ILIKE '%undefined%' OR banner_patrocinio ILIKE '%null%' THEN NULL
+          ELSE banner_patrocinio
+        END AS banner_patrocinio,
         tipo, status, moeda, regras, visibilidade, link_reuniao
       FROM public.eventos
       WHERE produtor_email = $1
@@ -227,6 +232,10 @@ exports.buscarEventoPorId = async (req, res) => {
           WHEN e.imagem_capa ILIKE '%undefined%' OR e.imagem_capa ILIKE '%null%' THEN NULL
           ELSE e.imagem_capa
         END AS imagem_capa,
+        CASE
+          WHEN e.banner_patrocinio ILIKE '%undefined%' OR e.banner_patrocinio ILIKE '%null%' THEN NULL
+          ELSE e.banner_patrocinio
+        END AS banner_patrocinio,
         p.nome AS produtor_nome,
         p.foto_perfil AS produtor_foto
       FROM public.eventos e
@@ -260,14 +269,15 @@ exports.buscarEventoPorId = async (req, res) => {
   }
 };
 
-// 4. CRIAR PRESENCIAL (Dono automático)
+// 4. CRIAR PRESENCIAL
 exports.criarEventoPresencial = async (req, res) => {
-  const imagemFinal = obterImagemFinal(req);
+  const imagemFinal = obterImagemFinal(req, 'imagem_capa');
+  const bannerFinal = obterImagemFinal(req, 'banner_patrocinio');
 
   const {
     nome,
     produtor_email,
-    usuario_nome, // Importante vir do Frontend
+    usuario_nome,
     categoria,
     descricao,
     data_inicio,
@@ -293,11 +303,11 @@ exports.criarEventoPresencial = async (req, res) => {
       INSERT INTO public.eventos (
         nome, produtor_email, usuario_nome, categoria, descricao, data_inicio, hora_inicio,
         data_termino, hora_termino, local_nome, cep, endereco, numero,
-        complemento, cidade, estado, capacidade, imagem_capa, tipo, status,
+        complemento, cidade, estado, capacidade, imagem_capa, banner_patrocinio, tipo, status,
         moeda, regras, visibilidade
       )
       VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
       )
       RETURNING id
     `;
@@ -305,7 +315,7 @@ exports.criarEventoPresencial = async (req, res) => {
     const values = [
       limparCampo(nome, 'Novo Evento'),
       normalizarEmail(produtor_email),
-      limparCampo(usuario_nome, 'Admin'), // Salva quem criou
+      limparCampo(usuario_nome, 'Admin'),
       normalizarCategoria(categoria),
       limparCampo(descricao, ''),
       normalizarData(data_inicio),
@@ -321,6 +331,7 @@ exports.criarEventoPresencial = async (req, res) => {
       limparCampo(estado, ''),
       limparNumero(capacidade, 0),
       imagemFinal,
+      bannerFinal,
       limparCampo(tipo, 'Presencial'),
       'Ativo',
       limparCampo(moeda, 'BRL'),
@@ -335,14 +346,15 @@ exports.criarEventoPresencial = async (req, res) => {
   }
 };
 
-// 5. CRIAR ONLINE (Dono automático)
+// 5. CRIAR ONLINE
 exports.criarEventoOnline = async (req, res) => {
-  const imagemFinal = obterImagemFinal(req);
+  const imagemFinal = obterImagemFinal(req, 'imagem_capa');
+  const bannerFinal = obterImagemFinal(req, 'banner_patrocinio');
 
   const {
     nome,
     produtor_email,
-    usuario_nome, // Importante vir do Frontend
+    usuario_nome,
     categoria,
     descricao,
     data_inicio,
@@ -362,11 +374,11 @@ exports.criarEventoOnline = async (req, res) => {
     const query = `
       INSERT INTO public.eventos (
         nome, produtor_email, usuario_nome, categoria, descricao, data_inicio, hora_inicio,
-        data_termino, hora_termino, local_nome, capacidade, imagem_capa, tipo,
+        data_termino, hora_termino, local_nome, capacidade, imagem_capa, banner_patrocinio, tipo,
         status, moeda, regras, visibilidade, link_reuniao
       )
       VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
       )
       RETURNING id
     `;
@@ -374,7 +386,7 @@ exports.criarEventoOnline = async (req, res) => {
     const values = [
       limparCampo(nome, 'Novo Evento Online'),
       normalizarEmail(produtor_email),
-      limparCampo(usuario_nome, 'Admin'), // Salva quem criou
+      limparCampo(usuario_nome, 'Admin'),
       normalizarCategoria(categoria),
       limparCampo(descricao, ''),
       normalizarData(data_inicio),
@@ -384,6 +396,7 @@ exports.criarEventoOnline = async (req, res) => {
       limparCampo(local_nome, 'Online'),
       limparNumero(capacidade, 0),
       imagemFinal,
+      bannerFinal,
       limparCampo(tipo, 'Online'),
       'Ativo',
       limparCampo(moeda, 'BRL'),
@@ -411,7 +424,8 @@ exports.atualizarEvento = async (req, res) => {
     }
 
     const atual = check.rows[0];
-    const imagemFinal = obterImagemFinal(req, atual.imagem_capa);
+    const imagemFinal = obterImagemFinal(req, 'imagem_capa', atual.imagem_capa);
+    const bannerFinal = obterImagemFinal(req, 'banner_patrocinio', atual.banner_patrocinio);
 
     const dataInicioFinal =
       req.body.data_inicio !== undefined
@@ -440,13 +454,14 @@ exports.atualizarEvento = async (req, res) => {
       limparCampo(req.body.estado, atual.estado || ''),
       limparNumero(req.body.capacidade, atual.capacidade || 0),
       imagemFinal,
+      bannerFinal,
       limparCampo(req.body.tipo, atual.tipo || 'Presencial'),
       limparCampo(req.body.status, atual.status || 'Ativo'),
       limparCampo(req.body.moeda, atual.moeda || 'BRL'),
       limparCampo(req.body.regras, atual.regras || ''),
       limparCampo(req.body.visibilidade, atual.visibilidade || 'Publico'),
       limparCampo(req.body.link_reuniao, atual.link_reuniao || ''),
-      limparCampo(req.body.usuario_nome, atual.usuario_nome), // Mantém ou atualiza o dono
+      limparCampo(req.body.usuario_nome, atual.usuario_nome),
       id
     ];
 
@@ -469,14 +484,15 @@ exports.atualizarEvento = async (req, res) => {
         estado = $14,
         capacidade = $15,
         imagem_capa = $16,
-        tipo = $17,
-        status = $18,
-        moeda = $19,
-        regras = $20,
-        visibilidade = $21,
-        link_reuniao = $22,
-        usuario_nome = $23
-      WHERE id = $24
+        banner_patrocinio = $17,
+        tipo = $18,
+        status = $19,
+        moeda = $20,
+        regras = $21,
+        visibilidade = $22,
+        link_reuniao = $23,
+        usuario_nome = $24
+      WHERE id = $25
       RETURNING *
     `;
 
