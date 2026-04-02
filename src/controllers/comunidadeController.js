@@ -38,7 +38,7 @@ exports.getComunidadesVitrine = async (req, res) => {
 
 /**
  * ==========================================
- * 2️⃣ ENVIAR MENSAGEM (Com suporte a Status e Host)
+ * 2️⃣ ENVIAR MENSAGEM (HOST DINÂMICO)
  * ==========================================
  */
 exports.enviarMensagem = async (req, res) => {
@@ -49,18 +49,27 @@ exports.enviarMensagem = async (req, res) => {
     texto,
     imagem,
     tipo,
-    status // Novo: Vem do seletor de emojis do front
+    status 
   } = req.body;
 
   if (!evento_id || !usuario_nome || !texto) {
     return res.status(400).json({ error: "Campos obrigatórios faltando" });
   }
 
-  // --- LÓGICA DA BORDA DOURADA ---
-  // Define quem é o host. Se for você, o banco salva como TRUE.
-  const isHost = (usuario_nome === "Marcos Boni");
-
   try {
+    // --- LÓGICA AUTOMÁTICA DE HOST ---
+    // Buscamos quem criou este evento específico na tabela 'eventos'
+    // IMPORTANTE: Verifique se sua coluna na tabela eventos se chama 'usuario_nome' ou 'criador'
+    const queryEvento = await db.query(
+        'SELECT usuario_nome FROM public.eventos WHERE id = $1', 
+        [evento_id]
+    );
+    
+    const donoDoEvento = queryEvento.rows[0]?.usuario_nome;
+    
+    // Se quem está enviando for o dono, marca como Host (is_host = true)
+    const isHost = (usuario_nome && donoDoEvento && usuario_nome.trim() === donoDoEvento.trim());
+
     const result = await db.query(`
       INSERT INTO public.mensagens_v2
       (
@@ -83,8 +92,8 @@ exports.enviarMensagem = async (req, res) => {
       texto,
       imagem || null,
       tipo || 'chat',
-      status || '✨', // Salva o emoji de humor
-      isHost         // Salva se tem a borda dourada
+      status || '✨',
+      isHost 
     ]);
 
     res.status(201).json(result.rows[0]);
@@ -96,7 +105,7 @@ exports.enviarMensagem = async (req, res) => {
 
 /**
  * ==========================================
- * 3️⃣ LISTAR MENSAGENS (Retornando Status e Host)
+ * 3️⃣ LISTAR MENSAGENS
  * ==========================================
  */
 exports.listarMensagensPorEvento = async (req, res) => {
@@ -129,12 +138,12 @@ exports.listarMensagensPorEvento = async (req, res) => {
 
 /**
  * ==========================================
- * 4️⃣ SISTEMA DE PRESENÇA (ONLINE COM HUMOR)
+ * 4️⃣ SISTEMA DE PRESENÇA (ONLINE DINÂMICO)
  * ==========================================
  */
 exports.atualizarPresenca = async (req, res) => {
   const { id } = req.params;
-  const { usuario_nome, foto, status } = req.query; // Status também via query para o Polling
+  const { usuario_nome, foto, status } = req.query;
 
   try {
     if (usuario_nome && usuario_nome !== 'undefined' && usuario_nome !== 'null') {
@@ -151,7 +160,7 @@ exports.atualizarPresenca = async (req, res) => {
         ON CONFLICT (evento_id, usuario_nome)
         DO UPDATE SET
           ultima_vez = NOW(),
-          status = EXCLUDED.status,
+          status = COALESCE(EXCLUDED.status, public.presenca.status),
           usuario_foto = COALESCE(EXCLUDED.usuario_foto, $5)
       `,
       [
@@ -163,22 +172,26 @@ exports.atualizarPresenca = async (req, res) => {
       ]);
     }
 
-    // Remove usuários inativos (mais de 20 segundos)
+    // Limpeza automática de quem saiu (offline)
     await db.query(`
       DELETE FROM public.presenca
       WHERE ultima_vez < NOW() - INTERVAL '20 seconds'
     `);
+
+    // Busca o dono do evento para marcar na lista lateral também
+    const queryDono = await db.query('SELECT usuario_nome FROM public.eventos WHERE id = $1', [id]);
+    const nomeDono = queryDono.rows[0]?.usuario_nome;
 
     const online = await db.query(`
       SELECT DISTINCT
         usuario_nome,
         status,
         COALESCE(usuario_foto, $2) AS usuario_foto,
-        -- Verifica se esse usuário online também é Host
-        (usuario_nome = 'Marcos Boni') as is_host
+        -- Lógica dinâmica de Host na lista online
+        (usuario_nome = $3) as is_host
       FROM public.presenca
       WHERE evento_id = $1
-    `, [id, AVATAR_FALLBACK]);
+    `, [id, AVATAR_FALLBACK, nomeDono]);
 
     res.status(200).json(online.rows);
   } catch (err) {
