@@ -1,5 +1,8 @@
 const db = require('../config/database');
 
+// Fallback de avatar
+const AVATAR_FALLBACK = 'https://i.pinimg.com/originals/ec/a5/a7/eca5a7c991e8fa52554e953593faba2d.gif';
+
 /**
  * ==========================================
  * 1️⃣ VITRINE DE COMUNIDADES
@@ -7,7 +10,6 @@ const db = require('../config/database');
  */
 exports.getComunidadesVitrine = async (req, res) => {
   try {
-
     const result = await db.query(`
       SELECT 
         e.id,
@@ -28,17 +30,11 @@ exports.getComunidadesVitrine = async (req, res) => {
     `);
 
     res.status(200).json(result.rows);
-
   } catch (err) {
-
     console.error('❌ ERRO VITRINE:', err.message);
-
-    res.status(500).json({
-      error: 'Erro ao carregar comunidades'
-    });
+    res.status(500).json({ error: 'Erro ao carregar comunidades' });
   }
 };
-
 
 /**
  * ==========================================
@@ -46,7 +42,6 @@ exports.getComunidadesVitrine = async (req, res) => {
  * ==========================================
  */
 exports.enviarMensagem = async (req, res) => {
-
   const {
     evento_id,
     usuario_nome,
@@ -57,13 +52,10 @@ exports.enviarMensagem = async (req, res) => {
   } = req.body;
 
   if (!evento_id || !usuario_nome || !texto) {
-    return res.status(400).json({
-      error: "Campos obrigatórios faltando"
-    });
+    return res.status(400).json({ error: "Campos obrigatórios faltando" });
   }
 
   try {
-
     const result = await db.query(`
       INSERT INTO public.mensagens_v2
       (
@@ -80,24 +72,18 @@ exports.enviarMensagem = async (req, res) => {
     [
       evento_id,
       usuario_nome,
-      usuario_foto || null,
+      usuario_foto || AVATAR_FALLBACK,
       texto,
       imagem || null,
       tipo || 'chat'
     ]);
 
     res.status(201).json(result.rows[0]);
-
   } catch (err) {
-
     console.error('❌ ERRO SALVAR MENSAGEM:', err.message);
-
-    res.status(500).json({
-      error: 'Erro ao salvar mensagem'
-    });
+    res.status(500).json({ error: 'Erro ao salvar mensagem' });
   }
 };
-
 
 /**
  * ==========================================
@@ -105,17 +91,15 @@ exports.enviarMensagem = async (req, res) => {
  * ==========================================
  */
 exports.listarMensagensPorEvento = async (req, res) => {
-
   const { evento_id } = req.params;
 
   try {
-
     const result = await db.query(`
       SELECT
         id,
         evento_id,
         usuario_nome,
-        usuario_foto,
+        COALESCE(usuario_foto, $2) AS usuario_foto,
         texto,
         imagem,
         tipo,
@@ -123,20 +107,14 @@ exports.listarMensagensPorEvento = async (req, res) => {
       FROM public.mensagens_v2
       WHERE evento_id = $1
       ORDER BY criado_em ASC
-    `, [evento_id]);
+    `, [evento_id, AVATAR_FALLBACK]);
 
     res.status(200).json(result.rows);
-
   } catch (err) {
-
     console.error('❌ ERRO LISTAR MENSAGENS:', err.message);
-
-    res.status(500).json({
-      error: 'Erro ao buscar mensagens'
-    });
+    res.status(500).json({ error: 'Erro ao buscar mensagens' });
   }
 };
-
 
 /**
  * ==========================================
@@ -144,18 +122,11 @@ exports.listarMensagensPorEvento = async (req, res) => {
  * ==========================================
  */
 exports.atualizarPresenca = async (req, res) => {
-
   const { id } = req.params;
   const { usuario_nome, foto } = req.query;
 
   try {
-
-    if (
-      usuario_nome &&
-      usuario_nome !== 'undefined' &&
-      usuario_nome !== 'null'
-    ) {
-
+    if (usuario_nome && usuario_nome !== 'undefined' && usuario_nome !== 'null') {
       await db.query(`
         INSERT INTO public.presenca
         (
@@ -168,18 +139,17 @@ exports.atualizarPresenca = async (req, res) => {
         ON CONFLICT (evento_id, usuario_nome)
         DO UPDATE SET
           ultima_vez = NOW(),
-          usuario_foto = EXCLUDED.usuario_foto
+          usuario_foto = COALESCE(EXCLUDED.usuario_foto, $4)
       `,
       [
         id,
         usuario_nome,
-        foto || null
+        foto || AVATAR_FALLBACK,
+        AVATAR_FALLBACK
       ]);
     }
 
-    /**
-     * Remove usuários inativos
-     */
+    // Remove usuários inativos
     await db.query(`
       DELETE FROM public.presenca
       WHERE ultima_vez < NOW() - INTERVAL '20 seconds'
@@ -188,19 +158,14 @@ exports.atualizarPresenca = async (req, res) => {
     const online = await db.query(`
       SELECT DISTINCT
         usuario_nome,
-        usuario_foto
+        COALESCE(usuario_foto, $2) AS usuario_foto
       FROM public.presenca
       WHERE evento_id = $1
-    `, [id]);
+    `, [id, AVATAR_FALLBACK]);
 
     res.status(200).json(online.rows);
-
   } catch (err) {
-
     console.error('❌ ERRO PRESENÇA:', err.message);
-
-    res.status(500).json({
-      error: 'Erro ao processar presença'
-    });
+    res.status(500).json({ error: 'Erro ao processar presença' });
   }
 };
