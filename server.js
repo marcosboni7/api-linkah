@@ -25,7 +25,7 @@ const allowedOrigins = [
   'https://www.linkah.eu',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
-  'https://linkah-frontend-3i4uq5o6n-marcos-projects-b325b3f0.vercel.app' // URL do seu log
+  'https://linkah-frontend-3i4uq5o6n-marcos-projects-b325b3f0.vercel.app'
 ];
 
 // ========================================
@@ -110,7 +110,7 @@ const inicializarBanco = async () => {
     await db.query('SELECT NOW()');
 
     // ========================================
-    // TABELAS BASE (TODAS AS ORIGINAIS + PRESENCA)
+    // TABELAS BASE (ESTRUTURA ATUALIZADA)
     // ========================================
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.usuarios (
@@ -159,10 +159,15 @@ const inicializarBanco = async () => {
 
       CREATE TABLE IF NOT EXISTS public.mensagens_v2 (
         id SERIAL PRIMARY KEY,
-        comunidade_id INTEGER,
+        evento_id INTEGER,
         usuario_nome VARCHAR(255),
-        conteudo TEXT,
-        data_envio TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        usuario_foto TEXT,
+        texto TEXT,
+        imagem TEXT,
+        tipo VARCHAR(50) DEFAULT 'chat',
+        status VARCHAR(10) DEFAULT '✨',
+        is_host BOOLEAN DEFAULT false,
+        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS public.presenca (
@@ -170,6 +175,7 @@ const inicializarBanco = async () => {
         evento_id INTEGER,
         usuario_nome VARCHAR(255),
         usuario_foto TEXT,
+        status VARCHAR(10) DEFAULT '✨',
         ultima_vez TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(evento_id, usuario_nome)
       );
@@ -208,14 +214,25 @@ const inicializarBanco = async () => {
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS categoria VARCHAR(100)",
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS data_inicio DATE",
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS hora_inicio TIME",
+      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS usuario_nome VARCHAR(255)", // Para lógica de Host
 
       // COMPRAS
       "ALTER TABLE public.compras ADD COLUMN IF NOT EXISTS valor_total DECIMAL(10,2)",
       "ALTER TABLE public.compras ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255)",
 
-      // MENSAGENS E PRESENÇA (FOTO)
+      // MENSAGENS V2 - Garantindo colunas do novo chat
+      "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS evento_id INTEGER",
       "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS usuario_foto TEXT",
-      "ALTER TABLE public.presenca ADD COLUMN IF NOT EXISTS usuario_foto TEXT"
+      "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS texto TEXT",
+      "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS imagem TEXT",
+      "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS tipo VARCHAR(50) DEFAULT 'chat'",
+      "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS status VARCHAR(10) DEFAULT '✨'",
+      "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS is_host BOOLEAN DEFAULT false",
+      "ALTER TABLE public.mensagens_v2 ADD COLUMN IF NOT EXISTS criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+
+      // PRESENCA - Garantindo colunas do novo online
+      "ALTER TABLE public.presenca ADD COLUMN IF NOT EXISTS usuario_foto TEXT",
+      "ALTER TABLE public.presenca ADD COLUMN IF NOT EXISTS status VARCHAR(10) DEFAULT '✨'"
     ];
 
     for(const sql of colunas){
