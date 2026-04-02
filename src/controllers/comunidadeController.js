@@ -38,7 +38,7 @@ exports.getComunidadesVitrine = async (req, res) => {
 
 /**
  * ==========================================
- * 2️⃣ ENVIAR MENSAGEM
+ * 2️⃣ ENVIAR MENSAGEM (Com suporte a Status e Host)
  * ==========================================
  */
 exports.enviarMensagem = async (req, res) => {
@@ -48,12 +48,17 @@ exports.enviarMensagem = async (req, res) => {
     usuario_foto,
     texto,
     imagem,
-    tipo
+    tipo,
+    status // Novo: Vem do seletor de emojis do front
   } = req.body;
 
   if (!evento_id || !usuario_nome || !texto) {
     return res.status(400).json({ error: "Campos obrigatórios faltando" });
   }
+
+  // --- LÓGICA DA BORDA DOURADA ---
+  // Define quem é o host. Se for você, o banco salva como TRUE.
+  const isHost = (usuario_nome === "Marcos Boni");
 
   try {
     const result = await db.query(`
@@ -64,9 +69,11 @@ exports.enviarMensagem = async (req, res) => {
         usuario_foto,
         texto,
         imagem,
-        tipo
+        tipo,
+        status,
+        is_host
       )
-      VALUES ($1,$2,$3,$4,$5,$6)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
       RETURNING *
     `,
     [
@@ -75,7 +82,9 @@ exports.enviarMensagem = async (req, res) => {
       usuario_foto || AVATAR_FALLBACK,
       texto,
       imagem || null,
-      tipo || 'chat'
+      tipo || 'chat',
+      status || '✨', // Salva o emoji de humor
+      isHost         // Salva se tem a borda dourada
     ]);
 
     res.status(201).json(result.rows[0]);
@@ -87,7 +96,7 @@ exports.enviarMensagem = async (req, res) => {
 
 /**
  * ==========================================
- * 3️⃣ LISTAR MENSAGENS
+ * 3️⃣ LISTAR MENSAGENS (Retornando Status e Host)
  * ==========================================
  */
 exports.listarMensagensPorEvento = async (req, res) => {
@@ -103,6 +112,8 @@ exports.listarMensagensPorEvento = async (req, res) => {
         texto,
         imagem,
         tipo,
+        status,
+        is_host,
         criado_em
       FROM public.mensagens_v2
       WHERE evento_id = $1
@@ -118,12 +129,12 @@ exports.listarMensagensPorEvento = async (req, res) => {
 
 /**
  * ==========================================
- * 4️⃣ SISTEMA DE PRESENÇA (ONLINE)
+ * 4️⃣ SISTEMA DE PRESENÇA (ONLINE COM HUMOR)
  * ==========================================
  */
 exports.atualizarPresenca = async (req, res) => {
   const { id } = req.params;
-  const { usuario_nome, foto } = req.query;
+  const { usuario_nome, foto, status } = req.query; // Status também via query para o Polling
 
   try {
     if (usuario_nome && usuario_nome !== 'undefined' && usuario_nome !== 'null') {
@@ -133,23 +144,26 @@ exports.atualizarPresenca = async (req, res) => {
           evento_id,
           usuario_nome,
           usuario_foto,
+          status,
           ultima_vez
         )
-        VALUES ($1,$2,$3,NOW())
+        VALUES ($1,$2,$3,$4,NOW())
         ON CONFLICT (evento_id, usuario_nome)
         DO UPDATE SET
           ultima_vez = NOW(),
-          usuario_foto = COALESCE(EXCLUDED.usuario_foto, $4)
+          status = EXCLUDED.status,
+          usuario_foto = COALESCE(EXCLUDED.usuario_foto, $5)
       `,
       [
         id,
         usuario_nome,
         foto || AVATAR_FALLBACK,
+        status || '✨',
         AVATAR_FALLBACK
       ]);
     }
 
-    // Remove usuários inativos
+    // Remove usuários inativos (mais de 20 segundos)
     await db.query(`
       DELETE FROM public.presenca
       WHERE ultima_vez < NOW() - INTERVAL '20 seconds'
@@ -158,7 +172,10 @@ exports.atualizarPresenca = async (req, res) => {
     const online = await db.query(`
       SELECT DISTINCT
         usuario_nome,
-        COALESCE(usuario_foto, $2) AS usuario_foto
+        status,
+        COALESCE(usuario_foto, $2) AS usuario_foto,
+        -- Verifica se esse usuário online também é Host
+        (usuario_nome = 'Marcos Boni') as is_host
       FROM public.presenca
       WHERE evento_id = $1
     `, [id, AVATAR_FALLBACK]);
