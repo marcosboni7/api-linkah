@@ -73,18 +73,8 @@ const normalizarData = (valor) => {
 
   if (matchExtenso) {
     const meses = {
-      Jan: '01',
-      Feb: '02',
-      Mar: '03',
-      Apr: '04',
-      May: '05',
-      Jun: '06',
-      Jul: '07',
-      Aug: '08',
-      Sep: '09',
-      Oct: '10',
-      Nov: '11',
-      Dec: '12',
+      Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06',
+      Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12',
     };
 
     const mes = meses[matchExtenso[2]];
@@ -124,7 +114,6 @@ const normalizarHora = (valor) => {
   return hora.substring(0, 8);
 };
 
-// ✅ salva URL completa da Cloudinary
 const obterImagemFinal = (req, imagemAtual = null) => {
   let imagemFinal = imagemAtual;
 
@@ -202,7 +191,7 @@ exports.listarEventosPorProdutor = async (req, res) => {
     const emailLimpo = String(email).replace(/['"]+/g, '').trim().toLowerCase();
     const query = `
       SELECT
-        id, nome, produtor_email, categoria, descricao,
+        id, nome, produtor_email, usuario_nome, categoria, descricao,
         TO_CHAR(data_inicio, 'YYYY-MM-DD') AS data_inicio,
         hora_inicio,
         TO_CHAR(data_termino, 'YYYY-MM-DD') AS data_termino,
@@ -271,13 +260,14 @@ exports.buscarEventoPorId = async (req, res) => {
   }
 };
 
-// 4. CRIAR PRESENCIAL
+// 4. CRIAR PRESENCIAL (Dono automático)
 exports.criarEventoPresencial = async (req, res) => {
   const imagemFinal = obterImagemFinal(req);
 
   const {
     nome,
     produtor_email,
+    usuario_nome, // Importante vir do Frontend
     categoria,
     descricao,
     data_inicio,
@@ -301,16 +291,13 @@ exports.criarEventoPresencial = async (req, res) => {
   try {
     const query = `
       INSERT INTO public.eventos (
-        nome, produtor_email, categoria, descricao, data_inicio, hora_inicio,
+        nome, produtor_email, usuario_nome, categoria, descricao, data_inicio, hora_inicio,
         data_termino, hora_termino, local_nome, cep, endereco, numero,
         complemento, cidade, estado, capacidade, imagem_capa, tipo, status,
         moeda, regras, visibilidade
       )
       VALUES (
-        $1, $2, $3, $4, $5, $6,
-        $7, $8, $9, $10, $11, $12,
-        $13, $14, $15, $16, $17, $18,
-        $19, $20, $21, $22
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
       )
       RETURNING id
     `;
@@ -318,6 +305,7 @@ exports.criarEventoPresencial = async (req, res) => {
     const values = [
       limparCampo(nome, 'Novo Evento'),
       normalizarEmail(produtor_email),
+      limparCampo(usuario_nome, 'Admin'), // Salva quem criou
       normalizarCategoria(categoria),
       limparCampo(descricao, ''),
       normalizarData(data_inicio),
@@ -347,13 +335,14 @@ exports.criarEventoPresencial = async (req, res) => {
   }
 };
 
-// 5. CRIAR ONLINE
+// 5. CRIAR ONLINE (Dono automático)
 exports.criarEventoOnline = async (req, res) => {
   const imagemFinal = obterImagemFinal(req);
 
   const {
     nome,
     produtor_email,
+    usuario_nome, // Importante vir do Frontend
     categoria,
     descricao,
     data_inicio,
@@ -372,14 +361,12 @@ exports.criarEventoOnline = async (req, res) => {
   try {
     const query = `
       INSERT INTO public.eventos (
-        nome, produtor_email, categoria, descricao, data_inicio, hora_inicio,
+        nome, produtor_email, usuario_nome, categoria, descricao, data_inicio, hora_inicio,
         data_termino, hora_termino, local_nome, capacidade, imagem_capa, tipo,
         status, moeda, regras, visibilidade, link_reuniao
       )
       VALUES (
-        $1, $2, $3, $4, $5, $6,
-        $7, $8, $9, $10, $11, $12,
-        $13, $14, $15, $16, $17
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
       )
       RETURNING id
     `;
@@ -387,6 +374,7 @@ exports.criarEventoOnline = async (req, res) => {
     const values = [
       limparCampo(nome, 'Novo Evento Online'),
       normalizarEmail(produtor_email),
+      limparCampo(usuario_nome, 'Admin'), // Salva quem criou
       normalizarCategoria(categoria),
       limparCampo(descricao, ''),
       normalizarData(data_inicio),
@@ -458,6 +446,7 @@ exports.atualizarEvento = async (req, res) => {
       limparCampo(req.body.regras, atual.regras || ''),
       limparCampo(req.body.visibilidade, atual.visibilidade || 'Publico'),
       limparCampo(req.body.link_reuniao, atual.link_reuniao || ''),
+      limparCampo(req.body.usuario_nome, atual.usuario_nome), // Mantém ou atualiza o dono
       id
     ];
 
@@ -485,8 +474,9 @@ exports.atualizarEvento = async (req, res) => {
         moeda = $19,
         regras = $20,
         visibilidade = $21,
-        link_reuniao = $22
-      WHERE id = $23
+        link_reuniao = $22,
+        usuario_nome = $23
+      WHERE id = $24
       RETURNING *
     `;
 
