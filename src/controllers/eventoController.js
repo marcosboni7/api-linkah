@@ -1,7 +1,6 @@
 const db = require('../config/database');
-const Groq = require("groq-sdk"); // Mudado de OpenAI para Groq (Grátis)
+const Groq = require("groq-sdk");
 
-// Configuração da IA com a sua chave do Groq
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const CATEGORIAS_VALIDAS = [
@@ -14,9 +13,7 @@ const CATEGORIAS_VALIDAS = [
   'Família & Comunidade'
 ];
 
-// ========================================
-// SUAS FUNÇÕES DE LIMPEZA E NORMALIZAÇÃO (MANTIDAS)
-// ========================================
+const MOEDAS_VALIDAS = ['BRL', 'EUR', 'USD'];
 
 const limparCampo = (valor, fallback = '') => {
   if (
@@ -122,14 +119,32 @@ const normalizarHora = (valor) => {
   return hora.substring(0, 8);
 };
 
+const normalizarMoeda = (valor, fallback = 'BRL') => {
+  const moeda = limparCampo(valor, fallback).toUpperCase();
+
+  if (['R$', 'REAL', 'REAIS'].includes(moeda)) return 'BRL';
+  if (['€', 'EURO', 'EUROS'].includes(moeda)) return 'EUR';
+  if (['$', 'DOLAR', 'DÓLAR', 'DOLARES', 'DÓLARES'].includes(moeda)) return 'USD';
+
+  return MOEDAS_VALIDAS.includes(moeda) ? moeda : fallback;
+};
+
+const obterMoedaDoBody = (body = {}, fallback = 'BRL') => {
+  return normalizarMoeda(
+    body.moeda_evento ||
+    body.moeda ||
+    body.currency,
+    fallback
+  );
+};
+
 const obterImagemFinal = (req, campo, imagemAtual = null) => {
   let imagemFinal = imagemAtual;
 
   if (req.files && req.files[campo]) {
     const file = req.files[campo][0];
     imagemFinal = file.path || file.secure_url || file.url || imagemAtual;
-  } 
-  else if (req.body[campo]) {
+  } else if (req.body[campo]) {
     const imgBody = req.body[campo];
     const isLixo =
       !imgBody ||
@@ -261,13 +276,18 @@ exports.buscarEventoPorId = async (req, res) => {
     }
 
     const evento = result.rows[0];
+    evento.moeda = normalizarMoeda(evento.moeda, 'BRL');
 
     try {
       const resIng = await db.query(
         'SELECT * FROM public.ingressos WHERE evento_id = $1 ORDER BY preco ASC',
         [id]
       );
-      evento.ingressos = resIng.rows;
+
+      evento.ingressos = resIng.rows.map((ing) => ({
+        ...ing,
+        moeda: normalizarMoeda(ing.moeda || evento.moeda, evento.moeda)
+      }));
     } catch (ingErr) {
       console.warn('⚠️ Erro ao buscar ingressos:', ingErr.message);
       evento.ingressos = [];
@@ -304,11 +324,12 @@ exports.criarEventoPresencial = async (req, res) => {
     cidade,
     estado,
     capacidade,
-    moeda,
     tipo,
     regras,
     visibilidade
   } = req.body;
+
+  const moedaFinal = obterMoedaDoBody(req.body, 'BRL');
 
   try {
     const query = `
@@ -346,13 +367,17 @@ exports.criarEventoPresencial = async (req, res) => {
       bannerFinal,
       limparCampo(tipo, 'Presencial'),
       'Ativo',
-      limparCampo(moeda, 'BRL'),
+      moedaFinal,
       limparCampo(regras, ''),
       limparCampo(visibilidade, 'Publico')
     ];
 
     const result = await db.query(query, values);
-    return res.status(201).json({ message: 'Evento criado!', id: result.rows[0].id });
+    return res.status(201).json({
+      message: 'Evento criado!',
+      id: result.rows[0].id,
+      moeda: moedaFinal
+    });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -385,6 +410,8 @@ exports.atualizarEvento = async (req, res) => {
         ? normalizarData(req.body.data_termino)
         : normalizarData(atual.data_termino);
 
+    const moedaFinal = obterMoedaDoBody(req.body, normalizarMoeda(atual.moeda || 'BRL'));
+
     const values = [
       limparCampo(req.body.nome, atual.nome),
       normalizarCategoria(req.body.categoria || atual.categoria),
@@ -405,7 +432,7 @@ exports.atualizarEvento = async (req, res) => {
       bannerFinal,
       limparCampo(req.body.tipo, atual.tipo || 'Presencial'),
       limparCampo(req.body.status, atual.status || 'Ativo'),
-      limparCampo(req.body.moeda, atual.moeda || 'BRL'),
+      moedaFinal,
       limparCampo(req.body.regras, atual.regras || ''),
       limparCampo(req.body.visibilidade, atual.visibilidade || 'Publico'),
       limparCampo(req.body.link_reuniao, atual.link_reuniao || ''),
@@ -472,13 +499,20 @@ exports.excluirEvento = async (req, res) => {
 // ========================================
 exports.salvarIngressos = async (req, res) => {
   const { id } = req.params;
-  const { ingressos, moeda_evento } = req.body;
+  const { ingressos } = req.body;
+
+  const moedaFinal = obterMoedaDoBody(req.body, 'BRL');
 
   try {
     await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
 
     if (ingressos && Array.isArray(ingressos)) {
       for (const ing of ingressos) {
+        const moedaIngresso = normalizarMoeda(
+          ing.moeda || ing.moeda_evento || req.body.moeda || req.body.moeda_evento || req.body.currency,
+          moedaFinal
+        );
+
         await db.query(
           `
             INSERT INTO public.ingressos (evento_id, nome, preco, quantidade, moeda)
@@ -489,21 +523,23 @@ exports.salvarIngressos = async (req, res) => {
             limparCampo(ing.nome, 'Ingresso'),
             Number(ing.preco) || 0,
             limparNumero(ing.quantidade, 0),
-            limparCampo(moeda_evento, 'BRL')
+            moedaIngresso
           ]
         );
       }
     }
 
-    if (moeda_evento) {
-      await db.query('UPDATE public.eventos SET moeda = $1 WHERE id = $2', [
-        moeda_evento,
-        id
-      ]);
-    }
+    await db.query(
+      'UPDATE public.eventos SET moeda = $1 WHERE id = $2',
+      [moedaFinal, id]
+    );
 
-    return res.status(200).json({ message: 'Salvo!' });
+    return res.status(200).json({
+      message: 'Salvo!',
+      moeda: moedaFinal
+    });
   } catch (err) {
+    console.error('❌ Erro ao salvar ingressos:', err.message);
     return res.status(500).json({ error: err.message });
   }
 };
@@ -524,11 +560,10 @@ exports.atualizarStatus = async (req, res) => {
 };
 
 // ========================================
-// 9. GERAR COM IA (✨ Mágica com Groq Grátis)
+// 9. GERAR COM IA
 // ========================================
 exports.gerarComIA = async (req, res) => {
-  // AJUSTADO: Agora recebe 'texto' para bater com o JSON.stringify({ texto: text }) do Front-end
-  const { texto } = req.body; 
+  const { texto } = req.body;
 
   if (!texto) {
     return res.status(400).json({ error: 'Forneça um texto para a IA processar.' });
@@ -543,7 +578,7 @@ exports.gerarComIA = async (req, res) => {
           Analise o texto e extraia as informações para um formulário.
           Hoje é ${new Date().toLocaleDateString('pt-BR')}.
           Categorias permitidas: ${CATEGORIAS_VALIDAS.join(', ')}.
-          
+
           Retorne APENAS um JSON puro com os campos:
           nome, categoria, descricao, data_inicio (YYYY-MM-DD), hora_inicio (HH:MM), data_termino (YYYY-MM-DD ou null), hora_termino (HH:MM ou null), local_nome, cidade, estado (Sigla UF), cep, capacidade (Number), preco_sugerido (Number).`
         },
@@ -558,7 +593,6 @@ exports.gerarComIA = async (req, res) => {
 
     const data = JSON.parse(chatCompletion.choices[0].message.content);
 
-    // Normalizando o retorno da IA com as suas funções originais
     const formatado = {
       ...data,
       categoria: normalizarCategoria(data.categoria),
