@@ -19,7 +19,7 @@ function isValidHttpUrl(value) {
   }
 }
 
-// --- 1. CRIAR SESSÃO DE CHECKOUT ---
+// --- 1. CRIAR SESSÃO DE CHECKOUT (ATUALIZADO PARA MULTI-MOEDA) ---
 exports.criarSessaoCheckout = async (req, res) => {
   try {
     if (!process.env.STRIPE_SECRET_KEY) {
@@ -33,9 +33,10 @@ exports.criarSessaoCheckout = async (req, res) => {
       return res.status(500).json({ error: 'FRONTEND_URL inválida ou ausente.' });
     }
 
+    // Busca o evento incluindo a coluna de moeda do seu banco
     const dadosEventoBD = await db.query(
       `SELECT 
-        e.id, e.nome, e.data_inicio, e.hora_inicio, e.local_nome, e.preco, e.tipo, e.link_reuniao,
+        e.id, e.nome, e.data_inicio, e.hora_inicio, e.local_nome, e.preco, e.tipo, e.link_reuniao, e.moeda,
         COALESCE(p.stripe_account_id, u.stripe_account_id) as stripe_account_id
        FROM public.eventos e
        LEFT JOIN public.produtores p ON e.produtor_email = p.email 
@@ -49,11 +50,15 @@ exports.criarSessaoCheckout = async (req, res) => {
     }
 
     const ev = dadosEventoBD.rows[0];
+    
+    // Define a moeda vinda do banco ou 'brl' como fallback
+    const moedaFinal = (ev.moeda || 'brl').toLowerCase();
+
     const precoUnitario = ev.preco && Number(ev.preco) !== 0 ? Number(ev.preco) : Number(evento.preco);
     const precoFinalEmCentavos = Math.round(precoUnitario * 100);
 
     if (precoFinalEmCentavos < 50) {
-      return res.status(400).json({ error: 'Valor mínimo R$ 0,50.' });
+      return res.status(400).json({ error: `Valor mínimo 0.50 ${moedaFinal.toUpperCase()}.` });
     }
 
     const sessionParams = {
@@ -62,7 +67,7 @@ exports.criarSessaoCheckout = async (req, res) => {
       line_items: [
         {
           price_data: {
-            currency: 'brl',
+            currency: moedaFinal, // MOEDA DINÂMICA AQUI
             product_data: {
               name: `Ingresso: ${ev.nome}`,
               description: `Evento em ${
@@ -84,13 +89,14 @@ exports.criarSessaoCheckout = async (req, res) => {
         horaEvento: ev.hora_inicio || 'A confirmar',
         localEvento: ev.tipo?.toLowerCase() === 'online' ? 'Evento Online' : ev.local_nome || 'Local a definir',
         linkReuniao: ev.link_reuniao || '',
+        moeda: moedaFinal.toUpperCase()
       },
       success_url: `${baseUrl}/pagamento/sucesso?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${baseUrl}/venda?eventoId=${ev.id}&qtd=${quantidade}`,
     };
 
     if (ev.stripe_account_id) {
-      const feePercent = 0.05; // Sua comissão de 5%
+      const feePercent = 0.05; // Comissão de 5%
       sessionParams.payment_intent_data = {
         application_fee_amount: Math.round(precoFinalEmCentavos * feePercent * parseInt(quantidade)),
         transfer_data: { destination: ev.stripe_account_id },
@@ -122,7 +128,6 @@ exports.vincularContaStripe = async (req, res) => {
         capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
       });
       stripeAccountId = account.id;
-      // Atualiza em ambas as tabelas para garantir
       await db.query('UPDATE public.produtores SET stripe_account_id = $1 WHERE email = $2', [stripeAccountId, email]);
       await db.query('UPDATE public.usuarios SET stripe_account_id = $1 WHERE email = $2', [stripeAccountId, email]);
     }
@@ -141,7 +146,7 @@ exports.vincularContaStripe = async (req, res) => {
   }
 };
 
-// --- 3. VERIFICAR STATUS DA CONTA (CORRIGIDO) ---
+// --- 3. VERIFICAR STATUS DA CONTA ---
 exports.verificarStatusStripe = async (req, res) => {
   try {
     const { email } = req.query;
@@ -150,10 +155,7 @@ exports.verificarStatusStripe = async (req, res) => {
 
     if (!stripeAccountId) return res.json({ conectado: false });
 
-    // Busca os dados REAIS da conta no Stripe
     const account = await stripe.accounts.retrieve(stripeAccountId);
-
-    // Lógica rigorosa: só está ativo se o Stripe liberou cobranças (charges) e transferências (payouts)
     const temPendencias = account.requirements.currently_due.length > 0;
     const estaHabilitado = account.charges_enabled && account.payouts_enabled;
 
@@ -172,7 +174,7 @@ exports.verificarStatusStripe = async (req, res) => {
   }
 };
 
-// --- 4. WEBHOOK ---
+// --- 4. WEBHOOK (ATUALIZADO PARA SUPORTAR MOEDA NA NOTIFICAÇÃO) ---
 exports.webhookStripe = async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
@@ -187,8 +189,6 @@ exports.webhookStripe = async (req, res) => {
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const meta = session.metadata;
-
-    console.log(`\n🔔 Webhook recebido para: ${meta.usuarioEmail}`);
 
     try {
       const existeResult = await db.query('SELECT id FROM public.compras WHERE stripe_session_id = $1', [session.id]);
@@ -228,10 +228,10 @@ exports.webhookStripe = async (req, res) => {
         tipo: tipoEvento
       });
 
-      console.log("✅ Webhook processado e e-mail enviado!");
+      console.log(`✅ Webhook processado: Venda em ${session.currency.toUpperCase()}`);
 
     } catch (err) {
-      console.error('❌ Erro no processamento interno do Webhook:', err.message);
+      console.error('❌ Erro no Webhook:', err.message);
     }
   }
 
@@ -245,9 +245,9 @@ exports.buscarDetalhesCompra = async (req, res) => {
 
     const result = await db.query(
       `SELECT c.*, e.hora_inicio as hora_evento, e.local_nome as local_evento, e.link_reuniao, e.tipo
-       FROM public.compras c
-       LEFT JOIN public.eventos e ON e.id = c.evento_id
-       WHERE c.stripe_session_id = $1`,
+        FROM public.compras c
+        LEFT JOIN public.eventos e ON e.id = c.evento_id
+        WHERE c.stripe_session_id = $1`,
       [sessionId]
     );
 
@@ -263,8 +263,8 @@ exports.buscarDetalhesCompra = async (req, res) => {
 
       const novaCompra = await db.query(
         `INSERT INTO public.compras 
-         (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
-         VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7) RETURNING *`,
+          (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
+          VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7) RETURNING *`,
         [meta.usuarioEmail, parseInt(meta.eventoId), evData?.nome || meta.tituloEvento, new Date(), parseInt(meta.quantidade), session.amount_total / 100, session.id]
       );
 
@@ -284,9 +284,9 @@ exports.listarMeusIngressos = async (req, res) => {
     const { email } = req.query;
     const result = await db.query(
       `SELECT c.*, e.link_reuniao, TO_CHAR(c.data_evento, 'DD/MM/YYYY') as data 
-       FROM public.compras c 
-       LEFT JOIN public.eventos e ON e.id = c.evento_id
-       WHERE c.usuario_email = $1 ORDER BY c.id DESC`,
+        FROM public.compras c 
+        LEFT JOIN public.eventos e ON e.id = c.evento_id
+        WHERE c.usuario_email = $1 ORDER BY c.id DESC`,
       [email]
     );
     return res.json(result.rows);
