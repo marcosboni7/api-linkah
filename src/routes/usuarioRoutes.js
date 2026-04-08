@@ -1,40 +1,54 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../config/db'); // ajuste o caminho conforme seu projeto
+const db = require('../config/database'); // Ajustado para o nome do seu arquivo de conexão
+const bcrypt = require('bcrypt');
 
-// ROTA PARA LISTAR TODOS (O que o seu painel Staff precisa)
+// 1. LISTAR TODOS (GET /api/usuarios)
 router.get('/', async (req, res) => {
     try {
-        // Buscamos todos menos a senha por segurança
-        const [rows] = await db.execute('SELECT id, nome, email, role, status, created_at FROM usuarios');
-        res.json(rows);
+        // No Postgres usamos db.query e não desestruturamos [rows]
+        const result = await db.query('SELECT id, nome, email, status FROM public.usuarios ORDER BY id DESC');
+        res.json(result.rows);
     } catch (error) {
+        console.error("Erro ao buscar usuários:", error.message);
         res.status(500).json({ error: "Erro ao buscar usuários" });
     }
 });
 
-// ROTA PARA ATUALIZAR (Banir, Mudar Senha, etc)
+// 2. ATUALIZAR STATUS (PUT /api/usuarios/:id)
+// Usado pelo botão de Banir/Reativar do seu Front
 router.put('/:id', async (req, res) => {
     const { id } = req.params;
-    const { nome, role, status, password } = req.body;
+    const { status } = req.body;
     
     try {
-        if (password) {
-            // Se enviou senha nova, atualiza tudo (ideal seria usar bcrypt aqui)
-            await db.execute(
-                'UPDATE usuarios SET nome = ?, role = ?, status = ?, senha = ? WHERE id = ?',
-                [nome, role, status, password, id]
-            );
-        } else {
-            // Se não enviou senha, atualiza só os dados
-            await db.execute(
-                'UPDATE usuarios SET nome = ?, role = ?, status = ? WHERE id = ?',
-                [nome, role, status, id]
-            );
-        }
-        res.json({ message: "Usuário atualizado!" });
+        await db.query(
+            'UPDATE public.usuarios SET status = $1 WHERE id = $2',
+            [status, id]
+        );
+        res.json({ message: "Status atualizado!" });
     } catch (error) {
-        res.status(500).json({ error: "Erro ao atualizar" });
+        res.status(500).json({ error: "Erro ao atualizar status" });
+    }
+});
+
+// 3. ALTERAR SENHA (PATCH /api/usuarios/:id/senha)
+// Usado pelo modal de nova senha do seu Front
+router.patch('/:id/senha', async (req, res) => {
+    const { id } = req.params;
+    const { senha } = req.body;
+
+    try {
+        const salt = await bcrypt.genSalt(10);
+        const hash = await bcrypt.hash(senha, salt);
+
+        await db.query(
+            'UPDATE public.usuarios SET senha = $1 WHERE id = $2',
+            [hash, id]
+        );
+        res.json({ message: "Senha alterada com sucesso!" });
+    } catch (error) {
+        res.status(500).json({ error: "Erro ao atualizar senha" });
     }
 });
 

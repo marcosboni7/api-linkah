@@ -10,6 +10,7 @@ const eventoRoutes = require('./src/routes/eventoRoutes');
 const compraRoutes = require('./src/routes/compraRoutes');
 const pagamentoRoutes = require('./src/routes/pagamentoRoutes');
 const comunidadeRoutes = require('./src/routes/comunidadeRoutes');
+const usuarioRoutes = require('./src/routes/usuarioRoutes'); // <-- ADICIONADO
 
 const pagamentoController = require('./src/controllers/pagamentoController');
 const db = require('./src/config/database');
@@ -145,7 +146,7 @@ const inicializarBanco = async () => {
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS descricao TEXT",
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS preco DECIMAL(10,2) DEFAULT 0",
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS imagem_capa TEXT",
-      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS banner_patrocinio TEXT", // NOVO CAMPO
+      "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS banner_patrocinio TEXT",
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS categoria VARCHAR(100)",
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS data_inicio DATE",
       "ALTER TABLE public.eventos ADD COLUMN IF NOT EXISTS hora_inicio TIME",
@@ -191,6 +192,7 @@ app.use('/api/eventos', eventoRoutes);
 app.use('/api/pagamento', pagamentoRoutes);
 app.use('/api/compras', compraRoutes);
 app.use('/api/comunidades', comunidadeRoutes);
+app.use('/api/usuarios', usuarioRoutes); // <-- ADICIONADO
 
 // Health Check
 app.get('/ping', (req, res) => {
