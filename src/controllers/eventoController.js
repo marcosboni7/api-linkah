@@ -284,9 +284,10 @@ exports.buscarEventoPorId = async (req, res) => {
         [id]
       );
 
+      // 🔥 moeda do ingresso SEMPRE segue a moeda do evento
       evento.ingressos = resIng.rows.map((ing) => ({
         ...ing,
-        moeda: normalizarMoeda(ing.moeda || evento.moeda, evento.moeda)
+        moeda: evento.moeda
       }));
     } catch (ingErr) {
       console.warn('⚠️ Erro ao buscar ingressos:', ingErr.message);
@@ -472,6 +473,13 @@ exports.atualizarEvento = async (req, res) => {
     `;
 
     const result = await db.query(queryUpdate, values);
+
+    // 🔥 se a moeda do evento mudou, sincroniza ingressos já existentes
+    await db.query(
+      'UPDATE public.ingressos SET moeda = $1 WHERE evento_id = $2',
+      [moedaFinal, id]
+    );
+
     return res.status(200).json({ message: 'Atualizado!', evento: result.rows[0] });
   } catch (err) {
     console.error('❌ ERRO NO UPDATE:', err.message);
@@ -501,18 +509,23 @@ exports.salvarIngressos = async (req, res) => {
   const { id } = req.params;
   const { ingressos } = req.body;
 
-  const moedaFinal = obterMoedaDoBody(req.body, 'BRL');
-
   try {
+    // 🔥 busca a moeda DO EVENTO no banco
+    const eventoResult = await db.query(
+      'SELECT moeda FROM public.eventos WHERE id = $1 LIMIT 1',
+      [id]
+    );
+
+    if (eventoResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Evento não encontrado.' });
+    }
+
+    const moedaEvento = normalizarMoeda(eventoResult.rows[0].moeda, 'BRL');
+
     await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
 
     if (ingressos && Array.isArray(ingressos)) {
       for (const ing of ingressos) {
-        const moedaIngresso = normalizarMoeda(
-          ing.moeda || ing.moeda_evento || req.body.moeda || req.body.moeda_evento || req.body.currency,
-          moedaFinal
-        );
-
         await db.query(
           `
             INSERT INTO public.ingressos (evento_id, nome, preco, quantidade, moeda)
@@ -523,20 +536,15 @@ exports.salvarIngressos = async (req, res) => {
             limparCampo(ing.nome, 'Ingresso'),
             Number(ing.preco) || 0,
             limparNumero(ing.quantidade, 0),
-            moedaIngresso
+            moedaEvento // 🔥 SEMPRE usa a moeda do evento
           ]
         );
       }
     }
 
-    await db.query(
-      'UPDATE public.eventos SET moeda = $1 WHERE id = $2',
-      [moedaFinal, id]
-    );
-
     return res.status(200).json({
       message: 'Salvo!',
-      moeda: moedaFinal
+      moeda: moedaEvento
     });
   } catch (err) {
     console.error('❌ Erro ao salvar ingressos:', err.message);
