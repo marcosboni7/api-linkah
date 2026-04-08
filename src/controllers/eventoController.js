@@ -387,7 +387,7 @@ exports.criarEventoPresencial = async (req, res) => {
 };
 
 // ========================================
-// 5. ATUALIZAR EVENTO (COM TAXA CORRIGIDA)
+// 5. ATUALIZAR EVENTO (AJUSTADO PARA SALVAR VALORES)
 // ========================================
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
@@ -483,6 +483,7 @@ exports.atualizarEvento = async (req, res) => {
 
     const result = await db.query(queryUpdate, values);
 
+    // Sincroniza a moeda dos ingressos se ela tiver mudado
     await db.query(
       'UPDATE public.ingressos SET moeda = $1 WHERE evento_id = $2',
       [moedaFinal, id]
