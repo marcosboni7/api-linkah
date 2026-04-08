@@ -4,6 +4,34 @@ const { sendMail } = require('../config/mailer');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'linkah_secret_fallback_2026';
 
+function safeString(value, fallback = '') {
+  if (value === null || value === undefined) return fallback;
+  return String(value).trim();
+}
+
+function safeLowerEmail(value) {
+  return safeString(value).toLowerCase();
+}
+
+function emptyToNull(value) {
+  const str = safeString(value);
+  return str === '' ? null : str;
+}
+
+function getErrorMessage(err) {
+  if (!err) return 'Erro desconhecido';
+  if (typeof err === 'string') return err;
+  if (typeof err.message === 'string' && err.message.trim()) return err.message;
+
+  try {
+    const asString = err.toString?.();
+    if (typeof asString === 'string' && asString.trim() && asString !== '[object Object]') {
+      return asString;
+    }
+  } catch {}
+
+  return 'Erro desconhecido';
+}
 
 // -----------------------------
 // 1️⃣ REGISTRO DE PRODUTOR
@@ -12,9 +40,50 @@ exports.registerProdutor = async (req, res) => {
   console.log('📝 [REGISTRO] Iniciando cadastro...');
 
   try {
-    const nome = (req.body.nome || '').trim();
-    const email = (req.body.email || '').trim().toLowerCase();
-    const senha = String(req.body.senha || '');
+    const nome = safeString(req.body.nome);
+    const email = safeLowerEmail(req.body.email);
+    const senha = safeString(req.body.senha);
+
+    const cpf_cnpj = emptyToNull(req.body.cpf_cnpj);
+    const telefone = emptyToNull(req.body.telefone);
+    const tipo = safeString(req.body.tipo || 'PF') || 'PF';
+    const data_nascimento = emptyToNull(req.body.data_nascimento);
+    const cep = emptyToNull(req.body.cep);
+    const rua = emptyToNull(req.body.rua);
+    const numero = emptyToNull(req.body.numero);
+    const bairro = emptyToNull(req.body.bairro);
+    const estado = emptyToNull(req.body.estado ? String(req.body.estado).toUpperCase() : null);
+    const razao_social = emptyToNull(req.body.razao_social);
+
+    if (!nome) {
+      return res.status(400).json({
+        message: 'Nome é obrigatório.'
+      });
+    }
+
+    if (!email) {
+      return res.status(400).json({
+        message: 'E-mail é obrigatório.'
+      });
+    }
+
+    if (!/\S+@\S+\.\S+/.test(email)) {
+      return res.status(400).json({
+        message: 'E-mail inválido.'
+      });
+    }
+
+    if (!senha) {
+      return res.status(400).json({
+        message: 'Senha é obrigatória.'
+      });
+    }
+
+    if (senha.length < 6) {
+      return res.status(400).json({
+        message: 'A senha deve ter pelo menos 6 caracteres.'
+      });
+    }
 
     const checkUser = await db.query(
       `
@@ -49,16 +118,16 @@ exports.registerProdutor = async (req, res) => {
         nome,
         email,
         senha,
-        req.body.cpf_cnpj || null,
-        req.body.telefone || null,
-        req.body.tipo || 'PF',
-        req.body.data_nascimento || null,
-        req.body.cep || null,
-        req.body.rua || null,
-        req.body.numero || null,
-        req.body.bairro || null,
-        req.body.estado || null,
-        req.body.razao_social || null,
+        cpf_cnpj,
+        telefone,
+        tipo,
+        data_nascimento,
+        cep,
+        rua,
+        numero,
+        bairro,
+        estado,
+        razao_social,
         'Ativo',
         'produtor'
       ]
@@ -66,11 +135,15 @@ exports.registerProdutor = async (req, res) => {
 
     const user = result.rows[0];
 
-    sendMail(
-      email,
-      'Bem-vindo à Linkah!',
-      `<h2>Olá ${nome}</h2><p>Sua conta foi criada com sucesso.</p>`
-    ).catch(err => console.log('MAIL ERROR:', err.message));
+    try {
+      await sendMail(
+        email,
+        'Bem-vindo à Linkah!',
+        `<h2>Olá ${nome}</h2><p>Sua conta foi criada com sucesso.</p>`
+      );
+    } catch (mailErr) {
+      console.log('MAIL ERROR:', getErrorMessage(mailErr));
+    }
 
     return res.status(201).json({
       message: 'Cadastro realizado com sucesso!',
@@ -81,11 +154,10 @@ exports.registerProdutor = async (req, res) => {
     console.error('❌ ERRO REGISTRO:', err);
     return res.status(500).json({
       message: 'Erro ao cadastrar',
-      error: err.message
+      error: getErrorMessage(err)
     });
   }
 };
-
 
 // -----------------------------
 // 2️⃣ LOGIN
@@ -94,8 +166,8 @@ exports.login = async (req, res) => {
   console.log('🔑 [LOGIN] Tentativa...');
 
   try {
-    const email = (req.body.email || '').trim().toLowerCase();
-    const senha = String(req.body.senha || '');
+    const email = safeLowerEmail(req.body.email);
+    const senha = safeString(req.body.senha);
 
     if (!email || !senha) {
       return res.status(400).json({
@@ -143,11 +215,11 @@ exports.login = async (req, res) => {
   } catch (err) {
     console.error('❌ ERRO LOGIN:', err);
     return res.status(500).json({
-      message: 'Erro no servidor'
+      message: 'Erro no servidor',
+      error: getErrorMessage(err)
     });
   }
 };
-
 
 // -----------------------------
 // 3️⃣ BUSCAR PERFIL
@@ -156,7 +228,13 @@ exports.getPerfil = async (req, res) => {
   console.log('👤 [PERFIL] Buscando...');
 
   try {
-    const email = (req.query.email || '').trim().toLowerCase();
+    const email = safeLowerEmail(req.query.email);
+
+    if (!email) {
+      return res.status(400).json({
+        message: 'E-mail não informado.'
+      });
+    }
 
     let result = await db.query(
       'SELECT * FROM public.produtores WHERE LOWER(email)=$1',
@@ -184,11 +262,11 @@ exports.getPerfil = async (req, res) => {
   } catch (err) {
     console.error('❌ ERRO PERFIL:', err);
     return res.status(500).json({
-      message: 'Erro ao buscar perfil'
+      message: 'Erro ao buscar perfil',
+      error: getErrorMessage(err)
     });
   }
 };
-
 
 // -----------------------------
 // 4️⃣ ATUALIZAR PERFIL
@@ -197,7 +275,6 @@ exports.updatePerfil = async (req, res) => {
   console.log('🆙 [UPDATE PERFIL]');
 
   try {
-
     const {
       email_original,
       nome,
@@ -214,7 +291,7 @@ exports.updatePerfil = async (req, res) => {
       linkedin
     } = req.body;
 
-    const email = email_original?.trim().toLowerCase();
+    const email = safeLowerEmail(email_original);
 
     if (!email) {
       return res.status(400).json({
@@ -242,24 +319,23 @@ exports.updatePerfil = async (req, res) => {
       RETURNING *
       `,
       [
-        nome || null,
-        cpf_cnpj || null,
-        cep || null,
-        rua || null,
-        numero || null,
-        bairro || null,
-        estado || null,
-        telefone || null,
-        razao_social || null,
-        bio || null,
-        instagram || null,
-        linkedin || null,
+        emptyToNull(nome),
+        emptyToNull(cpf_cnpj),
+        emptyToNull(cep),
+        emptyToNull(rua),
+        emptyToNull(numero),
+        emptyToNull(bairro),
+        emptyToNull(estado ? String(estado).toUpperCase() : null),
+        emptyToNull(telefone),
+        emptyToNull(razao_social),
+        emptyToNull(bio),
+        emptyToNull(instagram),
+        emptyToNull(linkedin),
         email
       ]
     );
 
     if (result.rowCount === 0) {
-
       result = await db.query(
         `
         UPDATE public.usuarios
@@ -273,11 +349,11 @@ exports.updatePerfil = async (req, res) => {
         RETURNING *
         `,
         [
-          nome || null,
-          telefone || null,
-          bio || null,
-          instagram || null,
-          linkedin || null,
+          emptyToNull(nome),
+          emptyToNull(telefone),
+          emptyToNull(bio),
+          emptyToNull(instagram),
+          emptyToNull(linkedin),
           email
         ]
       );
@@ -300,26 +376,30 @@ exports.updatePerfil = async (req, res) => {
   } catch (err) {
     console.error('❌ ERRO UPDATE:', err);
     return res.status(500).json({
-      message: 'Erro interno ao atualizar'
+      message: 'Erro interno ao atualizar',
+      error: getErrorMessage(err)
     });
   }
 };
-
 
 // -----------------------------
 // 5️⃣ UPLOAD AVATAR
 // -----------------------------
 exports.uploadAvatar = async (req, res) => {
-
-  console.log("📷 [UPLOAD AVATAR]");
+  console.log('📷 [UPLOAD AVATAR]');
 
   try {
+    const email = safeLowerEmail(req.body.email);
 
-    const email = (req.body.email || '').trim().toLowerCase();
+    if (!email) {
+      return res.status(400).json({
+        message: 'E-mail não informado'
+      });
+    }
 
     if (!req.file) {
       return res.status(400).json({
-        message: "Nenhuma imagem enviada"
+        message: 'Nenhuma imagem enviada'
       });
     }
 
@@ -336,7 +416,6 @@ exports.uploadAvatar = async (req, res) => {
     );
 
     if (result.rowCount === 0) {
-
       result = await db.query(
         `
         UPDATE public.usuarios
@@ -350,35 +429,31 @@ exports.uploadAvatar = async (req, res) => {
 
     if (result.rowCount === 0) {
       return res.status(404).json({
-        message: "Usuário não encontrado"
+        message: 'Usuário não encontrado'
       });
     }
 
     return res.status(200).json({
-      message: "Avatar atualizado com sucesso!",
+      message: 'Avatar atualizado com sucesso!',
       avatar: avatarUrl
     });
 
   } catch (err) {
-
-    console.error("❌ ERRO AVATAR:", err);
+    console.error('❌ ERRO AVATAR:', err);
 
     return res.status(500).json({
-      message: "Erro ao enviar avatar"
+      message: 'Erro ao enviar avatar',
+      error: getErrorMessage(err)
     });
-
   }
 };
-
 
 // -----------------------------
 // 6️⃣ PERFIL PUBLICO
 // -----------------------------
 exports.getPerfilPublico = async (req, res) => {
-
   try {
-
-    const nome = (req.query.nome || '').trim();
+    const nome = safeString(req.query.nome);
 
     if (!nome) {
       return res.status(400).json({
@@ -397,7 +472,6 @@ exports.getPerfilPublico = async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-
       result = await db.query(
         `
         SELECT nome,bio,instagram,linkedin,avatar,role,status
@@ -420,7 +494,8 @@ exports.getPerfilPublico = async (req, res) => {
   } catch (err) {
     console.error('❌ ERRO PERFIL PUBLICO:', err);
     return res.status(500).json({
-      message: 'Erro ao buscar perfil público'
+      message: 'Erro ao buscar perfil público',
+      error: getErrorMessage(err)
     });
   }
 };
