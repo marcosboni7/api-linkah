@@ -2,7 +2,13 @@ const express = require('express');
 const router = express.Router();
 const comunidadeController = require('../controllers/comunidadeController');
 
-// --- ROTA DA HOME ---
+// --- ROTA PARA O DASHBOARD ADMIN ---
+// Esta deve vir antes das rotas com parâmetros (:id) para não dar conflito.
+// O Dashboard vai chamar: fetch(`${API_URL_BASE}/api/comunidades/total`)
+router.get('/total', comunidadeController.getTodasComunidades);
+
+// --- ROTA DA HOME (VITRINE) ---
+// Retorna apenas 3 com o bônus de marketing de +120 membros
 router.get('/', comunidadeController.getComunidadesVitrine);
 
 // --- ROTA DE PRESENÇA ---

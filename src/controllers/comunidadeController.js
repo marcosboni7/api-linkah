@@ -1,11 +1,11 @@
 const db = require('../config/database');
 
-// Fallback de avatar
+// Fallback de avatar para usuários sem foto
 const AVATAR_FALLBACK = 'https://i.pinimg.com/originals/ec/a5/a7/eca5a7c991e8fa52554e953593faba2d.gif';
 
 /**
  * ==========================================
- * 1️⃣ VITRINE DE COMUNIDADES
+ * 1️⃣ VITRINE DE COMUNIDADES (HOME)
  * ==========================================
  */
 exports.getComunidadesVitrine = async (req, res) => {
@@ -58,8 +58,7 @@ exports.enviarMensagem = async (req, res) => {
 
   try {
     // --- LÓGICA AUTOMÁTICA DE HOST ---
-    // Buscamos quem criou este evento específico na tabela 'eventos'
-    // IMPORTANTE: Verifique se sua coluna na tabela eventos se chama 'usuario_nome' ou 'criador'
+    // Buscamos quem criou este evento específico para validar o selo de Host
     const queryEvento = await db.query(
         'SELECT usuario_nome FROM public.eventos WHERE id = $1', 
         [evento_id]
@@ -67,7 +66,7 @@ exports.enviarMensagem = async (req, res) => {
     
     const donoDoEvento = queryEvento.rows[0]?.usuario_nome;
     
-    // Se quem está enviando for o dono, marca como Host (is_host = true)
+    // Se quem está enviando for o dono, marca como Host
     const isHost = (usuario_nome && donoDoEvento && usuario_nome.trim() === donoDoEvento.trim());
 
     const result = await db.query(`
@@ -172,7 +171,7 @@ exports.atualizarPresenca = async (req, res) => {
       ]);
     }
 
-    // Limpeza automática de quem saiu (offline)
+    // Limpeza automática de usuários inativos (timeout de 20s)
     await db.query(`
       DELETE FROM public.presenca
       WHERE ultima_vez < NOW() - INTERVAL '20 seconds'
@@ -187,7 +186,6 @@ exports.atualizarPresenca = async (req, res) => {
         usuario_nome,
         status,
         COALESCE(usuario_foto, $2) AS usuario_foto,
-        -- Lógica dinâmica de Host na lista online
         (usuario_nome = $3) as is_host
       FROM public.presenca
       WHERE evento_id = $1
@@ -197,5 +195,21 @@ exports.atualizarPresenca = async (req, res) => {
   } catch (err) {
     console.error('❌ ERRO PRESENÇA:', err.message);
     res.status(500).json({ error: 'Erro ao processar presença' });
+  }
+};
+
+/**
+ * ==========================================
+ * 5️⃣ LISTAR TODAS (DASHBOARD ADMIN)
+ * ==========================================
+ */
+exports.getTodasComunidades = async (req, res) => {
+  try {
+    // Retorna todos os eventos para contagem total no Dashboard
+    const result = await db.query('SELECT id FROM public.eventos');
+    res.status(200).json(result.rows);
+  } catch (err) {
+    console.error('❌ ERRO DASHBOARD TOTAL:', err.message);
+    res.status(500).json({ error: 'Erro ao listar todas as comunidades' });
   }
 };
