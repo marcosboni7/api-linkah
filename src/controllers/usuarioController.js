@@ -3,45 +3,57 @@ const bcrypt = require('bcrypt');
 
 /**
  * ==========================================
- * 1️⃣ LOGIN ADMINISTRATIVO (AJUSTADO)
+ * 1️⃣ LOGIN ADMINISTRATIVO (COM SUPER DEBUG)
  * ==========================================
  */
 exports.loginAdmin = async (req, res) => {
-  // Usamos trim() para evitar que um espaço no final do input estrague o login
+  console.log("--- [DEBUG LOGIN START] ---");
+  console.log("Payload recebido no Body:", req.body);
+
   const email = req.body.email ? req.body.email.trim() : '';
   const password = req.body.password ? req.body.password.trim() : '';
 
+  console.log(`Tentando autenticar: Email [${email}] | Password [${password}]`);
+
   try {
-    // ILIKE faz a busca ignorando se é maiúsculo ou minúsculo (Case Insensitive)
     const result = await db.query(
       'SELECT * FROM public.usuarios WHERE email ILIKE $1', 
       [email]
     );
     const user = result.rows[0];
 
-    // 1. Verifica se usuário existe
+    // 1. Verifica se usuário existe no banco
     if (!user) {
-      console.log(`[AUTH] Usuário não encontrado: ${email}`);
+      console.log(`❌ [DEBUG] Usuário NÃO encontrado no DB para o email: ${email}`);
       return res.status(401).json({ error: "Credenciais inválidas." });
     }
 
-    // 2. Compara a senha digitada com o hash do banco
+    console.log(`✅ [DEBUG] Usuário encontrado: ${user.email} (ID: ${user.id})`);
+    console.log(`🔍 [DEBUG] Hash no Banco: ${user.senha}`);
+    console.log(`🔍 [DEBUG] Role do Usuário: ${user.role}`);
+
+    // 2. Compara a senha
     const passwordMatch = await bcrypt.compare(password, user.senha);
+    
     if (!passwordMatch) {
-      console.log(`[AUTH] Senha incorreta para: ${email}`);
+      console.log(`❌ [DEBUG] Senha digitada NÃO bate com o hash do banco.`);
       return res.status(401).json({ error: "Credenciais inválidas." });
     }
+
+    console.log(`✅ [DEBUG] Senha validada com sucesso!`);
 
     // 3. Verifica se tem permissão de admin
     if (user.role !== 'admin') {
-      console.log(`[AUTH] Tentativa de acesso sem permissão: ${email}`);
+      console.log(`⚠️ [DEBUG] Usuário autenticado, mas o role é '${user.role}' e não 'admin'.`);
       return res.status(403).json({ error: "Acesso não autorizado ao console." });
     }
 
-    // 4. Resposta de sucesso (Enviamos um token para o seu localStorage não ficar vazio)
+    console.log(`🚀 [DEBUG] Login Master Concluído para: ${email}`);
+    console.log("--- [DEBUG LOGIN END] ---");
+
     res.status(200).json({ 
       message: "Autenticado com sucesso",
-      token: "linkah_master_token_2026", // O front precisa disso para o seu Layout funcionar
+      token: "linkah_master_token_2026",
       user: { 
         id: user.id, 
         nome: user.nome, 
@@ -51,7 +63,7 @@ exports.loginAdmin = async (req, res) => {
     });
 
   } catch (err) {
-    console.error('❌ ERRO LOGIN:', err.message);
+    console.error('🔥 [DEBUG FATAL ERROR]:', err.message);
     res.status(500).json({ error: "Erro interno no servidor" });
   }
 };
@@ -61,8 +73,6 @@ exports.loginAdmin = async (req, res) => {
  * 2️⃣ GERENCIAMENTO DE MEMBROS
  * ==========================================
  */
-
-// Lista todos os usuários (Membros) para o Dashboard
 exports.listarUsuarios = async (req, res) => {
   try {
     const result = await db.query('SELECT id, nome, email, status, role, criado_em FROM public.usuarios ORDER BY id DESC');
@@ -73,7 +83,6 @@ exports.listarUsuarios = async (req, res) => {
   }
 };
 
-// Atualiza status (Ativo/Banido)
 exports.atualizarUsuario = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
@@ -90,8 +99,6 @@ exports.atualizarUsuario = async (req, res) => {
  * 3️⃣ SEGURANÇA
  * ==========================================
  */
-
-// Altera a senha com criptografia
 exports.alterarSenha = async (req, res) => {
   const { id } = req.params;
   const { senha } = req.body;
