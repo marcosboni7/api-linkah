@@ -1,13 +1,25 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../config/database'); // Ajustado para o nome do seu arquivo de conexão
+const db = require('../config/database');
 const bcrypt = require('bcrypt');
+const usuarioController = require('../controllers/usuarioController'); // Certifique-se que o caminho está correto
 
-// 1. LISTAR TODOS (GET /api/usuarios)
+/**
+ * ==========================================
+ * 1️⃣ ROTA DE LOGIN (ESSA É A QUE ESTAVA FALTANDO!)
+ * ==========================================
+ */
+// Esta rota deve bater com: fetch(`${API_URL_BASE}/api/usuarios/login-admin`)
+router.post('/login-admin', usuarioController.loginAdmin);
+
+/**
+ * ==========================================
+ * 2️⃣ LISTAR TODOS (GET /api/usuarios)
+ * ==========================================
+ */
 router.get('/', async (req, res) => {
     try {
-        // No Postgres usamos db.query e não desestruturamos [rows]
-        const result = await db.query('SELECT id, nome, email, status FROM public.usuarios ORDER BY id DESC');
+        const result = await db.query('SELECT id, nome, email, status, role FROM public.usuarios ORDER BY id DESC');
         res.json(result.rows);
     } catch (error) {
         console.error("Erro ao buscar usuários:", error.message);
@@ -15,8 +27,11 @@ router.get('/', async (req, res) => {
     }
 });
 
-// 2. ATUALIZAR STATUS (PUT /api/usuarios/:id)
-// Usado pelo botão de Banir/Reativar do seu Front
+/**
+ * ==========================================
+ * 3️⃣ ATUALIZAR STATUS (PUT /api/usuarios/:id)
+ * ==========================================
+ */
 router.put('/:id', async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
@@ -32,8 +47,11 @@ router.put('/:id', async (req, res) => {
     }
 });
 
-// 3. ALTERAR SENHA (PATCH /api/usuarios/:id/senha)
-// Usado pelo modal de nova senha do seu Front
+/**
+ * ==========================================
+ * 4️⃣ ALTERAR SENHA (PATCH /api/usuarios/:id/senha)
+ * ==========================================
+ */
 router.patch('/:id/senha', async (req, res) => {
     const { id } = req.params;
     const { senha } = req.body;
