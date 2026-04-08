@@ -183,6 +183,7 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
         e.tipo,
         e.status,
         e.moeda,
+        e.taxa_plataforma,
         COALESCE(
           (
             SELECT MIN(CAST(i.preco AS NUMERIC))
@@ -229,7 +230,7 @@ exports.listarEventosPorProdutor = async (req, res) => {
           WHEN banner_patrocinio ILIKE '%undefined%' OR banner_patrocinio ILIKE '%null%' THEN NULL
           ELSE banner_patrocinio
         END AS banner_patrocinio,
-        tipo, status, moeda, regras, visibilidade, link_reuniao
+        tipo, status, moeda, regras, visibilidade, link_reuniao, taxa_plataforma
       FROM public.eventos
       WHERE produtor_email = $1
       ORDER BY id DESC
@@ -284,7 +285,6 @@ exports.buscarEventoPorId = async (req, res) => {
         [id]
       );
 
-      // 🔥 moeda do ingresso SEMPRE segue a moeda do evento
       evento.ingressos = resIng.rows.map((ing) => ({
         ...ing,
         moeda: evento.moeda
@@ -327,7 +327,8 @@ exports.criarEventoPresencial = async (req, res) => {
     capacidade,
     tipo,
     regras,
-    visibilidade
+    visibilidade,
+    taxa_plataforma
   } = req.body;
 
   const moedaFinal = obterMoedaDoBody(req.body, 'BRL');
@@ -338,10 +339,10 @@ exports.criarEventoPresencial = async (req, res) => {
         nome, produtor_email, usuario_nome, categoria, descricao, data_inicio, hora_inicio,
         data_termino, hora_termino, local_nome, cep, endereco, numero,
         complemento, cidade, estado, capacidade, imagem_capa, banner_patrocinio, tipo, status,
-        moeda, regras, visibilidade
+        moeda, regras, visibilidade, taxa_plataforma
       )
       VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
       )
       RETURNING id
     `;
@@ -370,7 +371,8 @@ exports.criarEventoPresencial = async (req, res) => {
       'Ativo',
       moedaFinal,
       limparCampo(regras, ''),
-      limparCampo(visibilidade, 'Publico')
+      limparCampo(visibilidade, 'Publico'),
+      parseFloat(taxa_plataforma || 0.05)
     ];
 
     const result = await db.query(query, values);
@@ -385,7 +387,7 @@ exports.criarEventoPresencial = async (req, res) => {
 };
 
 // ========================================
-// 5. ATUALIZAR EVENTO
+// 5. ATUALIZAR EVENTO (COM TAXA CORRIGIDA)
 // ========================================
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
@@ -413,6 +415,11 @@ exports.atualizarEvento = async (req, res) => {
 
     const moedaFinal = obterMoedaDoBody(req.body, normalizarMoeda(atual.moeda || 'BRL'));
 
+    // Pega a taxa enviada ou mantém a do banco
+    const taxaFinal = req.body.taxa_plataforma !== undefined 
+      ? parseFloat(req.body.taxa_plataforma) 
+      : parseFloat(atual.taxa_plataforma || 0.05);
+
     const values = [
       limparCampo(req.body.nome, atual.nome),
       normalizarCategoria(req.body.categoria || atual.categoria),
@@ -438,7 +445,8 @@ exports.atualizarEvento = async (req, res) => {
       limparCampo(req.body.visibilidade, atual.visibilidade || 'Publico'),
       limparCampo(req.body.link_reuniao, atual.link_reuniao || ''),
       limparCampo(req.body.usuario_nome, atual.usuario_nome),
-      id
+      taxaFinal, // $25
+      id         // $26
     ];
 
     const queryUpdate = `
@@ -467,14 +475,14 @@ exports.atualizarEvento = async (req, res) => {
         regras = $21,
         visibilidade = $22,
         link_reuniao = $23,
-        usuario_nome = $24
-      WHERE id = $25
+        usuario_nome = $24,
+        taxa_plataforma = $25
+      WHERE id = $26
       RETURNING *
     `;
 
     const result = await db.query(queryUpdate, values);
 
-    // 🔥 se a moeda do evento mudou, sincroniza ingressos já existentes
     await db.query(
       'UPDATE public.ingressos SET moeda = $1 WHERE evento_id = $2',
       [moedaFinal, id]
@@ -510,7 +518,6 @@ exports.salvarIngressos = async (req, res) => {
   const { ingressos } = req.body;
 
   try {
-    // 🔥 busca a moeda DO EVENTO no banco
     const eventoResult = await db.query(
       'SELECT moeda FROM public.eventos WHERE id = $1 LIMIT 1',
       [id]
@@ -536,7 +543,7 @@ exports.salvarIngressos = async (req, res) => {
             limparCampo(ing.nome, 'Ingresso'),
             Number(ing.preco) || 0,
             limparNumero(ing.quantidade, 0),
-            moedaEvento // 🔥 SEMPRE usa a moeda do evento
+            moedaEvento
           ]
         );
       }
@@ -583,12 +590,12 @@ exports.gerarComIA = async (req, res) => {
         {
           role: "system",
           content: `Você é um assistente de cadastro de eventos para a plataforma Linkah.
-          Analise o texto e extraia as informações para um formulário.
-          Hoje é ${new Date().toLocaleDateString('pt-BR')}.
-          Categorias permitidas: ${CATEGORIAS_VALIDAS.join(', ')}.
+           Analise o texto e extraia as informações para um formulário.
+           Hoje é ${new Date().toLocaleDateString('pt-BR')}.
+           Categorias permitidas: ${CATEGORIAS_VALIDAS.join(', ')}.
 
-          Retorne APENAS um JSON puro com os campos:
-          nome, categoria, descricao, data_inicio (YYYY-MM-DD), hora_inicio (HH:MM), data_termino (YYYY-MM-DD ou null), hora_termino (HH:MM ou null), local_nome, cidade, estado (Sigla UF), cep, capacidade (Number), preco_sugerido (Number).`
+           Retorne APENAS um JSON puro com os campos:
+           nome, categoria, descricao, data_inicio (YYYY-MM-DD), hora_inicio (HH:MM), data_termino (YYYY-MM-DD ou null), hora_termino (HH:MM ou null), local_nome, cidade, estado (Sigla UF), cep, capacidade (Number), preco_sugerido (Number).`
         },
         {
           role: "user",
