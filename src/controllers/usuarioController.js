@@ -3,19 +3,21 @@ const bcrypt = require('bcrypt');
 
 /**
  * ==========================================
- * 1️⃣ LOGIN ADMINISTRATIVO (COM SUPER DEBUG)
+ * 1️⃣ LOGIN ADMINISTRATIVO (COM AUTO-HASH DEBUG)
  * ==========================================
  */
 exports.loginAdmin = async (req, res) => {
   console.log("--- [DEBUG LOGIN START] ---");
-  console.log("Payload recebido no Body:", req.body);
-
+  
   const email = req.body.email ? req.body.email.trim() : '';
   const password = req.body.password ? req.body.password.trim() : '';
 
-  console.log(`Tentando autenticar: Email [${email}] | Password [${password}]`);
-
   try {
+    // LOG AUXILIAR: Gera o hash correto no seu ambiente atual
+    // Use o valor que aparecer aqui para atualizar seu banco de dados
+    const generatedHash = await bcrypt.hash('admin26', 10);
+    console.log(`🚀 [IMPORTANTE] Hash gerado agora para 'admin26': ${generatedHash}`);
+
     const result = await db.query(
       'SELECT * FROM public.usuarios WHERE email ILIKE $1', 
       [email]
@@ -24,13 +26,12 @@ exports.loginAdmin = async (req, res) => {
 
     // 1. Verifica se usuário existe no banco
     if (!user) {
-      console.log(`❌ [DEBUG] Usuário NÃO encontrado no DB para o email: ${email}`);
+      console.log(`❌ [DEBUG] Usuário NÃO encontrado: ${email}`);
       return res.status(401).json({ error: "Credenciais inválidas." });
     }
 
-    console.log(`✅ [DEBUG] Usuário encontrado: ${user.email} (ID: ${user.id})`);
-    console.log(`🔍 [DEBUG] Hash no Banco: ${user.senha}`);
-    console.log(`🔍 [DEBUG] Role do Usuário: ${user.role}`);
+    console.log(`✅ [DEBUG] Usuário encontrado: ${user.email}`);
+    console.log(`🔍 [DEBUG] Hash que está HOJE no Banco: ${user.senha}`);
 
     // 2. Compara a senha
     const passwordMatch = await bcrypt.compare(password, user.senha);
@@ -40,16 +41,13 @@ exports.loginAdmin = async (req, res) => {
       return res.status(401).json({ error: "Credenciais inválidas." });
     }
 
-    console.log(`✅ [DEBUG] Senha validada com sucesso!`);
-
     // 3. Verifica se tem permissão de admin
     if (user.role !== 'admin') {
-      console.log(`⚠️ [DEBUG] Usuário autenticado, mas o role é '${user.role}' e não 'admin'.`);
-      return res.status(403).json({ error: "Acesso não autorizado ao console." });
+      console.log(`⚠️ [DEBUG] Role '${user.role}' não autorizado.`);
+      return res.status(403).json({ error: "Acesso não autorizado." });
     }
 
-    console.log(`🚀 [DEBUG] Login Master Concluído para: ${email}`);
-    console.log("--- [DEBUG LOGIN END] ---");
+    console.log(`🚀 [DEBUG] Login Master Autorizado!`);
 
     res.status(200).json({ 
       message: "Autenticado com sucesso",
@@ -63,7 +61,7 @@ exports.loginAdmin = async (req, res) => {
     });
 
   } catch (err) {
-    console.error('🔥 [DEBUG FATAL ERROR]:', err.message);
+    console.error('🔥 [DEBUG ERROR]:', err.message);
     res.status(500).json({ error: "Erro interno no servidor" });
   }
 };
