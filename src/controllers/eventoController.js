@@ -387,7 +387,7 @@ exports.criarEventoPresencial = async (req, res) => {
 };
 
 // ========================================
-// 5. ATUALIZAR EVENTO (AJUSTADO PARA SALVAR VALORES)
+// 5. ATUALIZAR EVENTO
 // ========================================
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
@@ -415,10 +415,12 @@ exports.atualizarEvento = async (req, res) => {
 
     const moedaFinal = obterMoedaDoBody(req.body, normalizarMoeda(atual.moeda || 'BRL'));
 
-    // Pega a taxa enviada ou mantém a do banco
-    const taxaFinal = req.body.taxa_plataforma !== undefined 
-      ? parseFloat(req.body.taxa_plataforma) 
-      : parseFloat(atual.taxa_plataforma || 0.05);
+    const taxaFinal =
+      req.body.taxa_plataforma !== undefined &&
+      req.body.taxa_plataforma !== null &&
+      req.body.taxa_plataforma !== ''
+        ? parseFloat(req.body.taxa_plataforma)
+        : parseFloat(atual.taxa_plataforma || 0.05);
 
     const values = [
       limparCampo(req.body.nome, atual.nome),
@@ -445,8 +447,8 @@ exports.atualizarEvento = async (req, res) => {
       limparCampo(req.body.visibilidade, atual.visibilidade || 'Publico'),
       limparCampo(req.body.link_reuniao, atual.link_reuniao || ''),
       limparCampo(req.body.usuario_nome, atual.usuario_nome),
-      taxaFinal, // $25
-      id         // $26
+      taxaFinal,
+      id
     ];
 
     const queryUpdate = `
@@ -483,13 +485,15 @@ exports.atualizarEvento = async (req, res) => {
 
     const result = await db.query(queryUpdate, values);
 
-    // Sincroniza a moeda dos ingressos se ela tiver mudado
     await db.query(
       'UPDATE public.ingressos SET moeda = $1 WHERE evento_id = $2',
       [moedaFinal, id]
     );
 
-    return res.status(200).json({ message: 'Atualizado!', evento: result.rows[0] });
+    return res.status(200).json({
+      message: 'Atualizado!',
+      evento: result.rows[0]
+    });
   } catch (err) {
     console.error('❌ ERRO NO UPDATE:', err.message);
     return res.status(500).json({ error: err.message });
@@ -534,6 +538,16 @@ exports.salvarIngressos = async (req, res) => {
 
     if (ingressos && Array.isArray(ingressos)) {
       for (const ing of ingressos) {
+        const precoFinal =
+          ing.preco === '' || ing.preco === null || ing.preco === undefined
+            ? 0
+            : Number(ing.preco);
+
+        const quantidadeFinal =
+          ing.quantidade === '' || ing.quantidade === null || ing.quantidade === undefined
+            ? 0
+            : limparNumero(ing.quantidade, 0);
+
         await db.query(
           `
             INSERT INTO public.ingressos (evento_id, nome, preco, quantidade, moeda)
@@ -542,8 +556,8 @@ exports.salvarIngressos = async (req, res) => {
           [
             id,
             limparCampo(ing.nome, 'Ingresso'),
-            Number(ing.preco) || 0,
-            limparNumero(ing.quantidade, 0),
+            Number.isNaN(precoFinal) ? 0 : precoFinal,
+            quantidadeFinal,
             moedaEvento
           ]
         );
