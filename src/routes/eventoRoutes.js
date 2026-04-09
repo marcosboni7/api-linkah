@@ -3,7 +3,6 @@ const router = express.Router();
 const eventoController = require('../controllers/eventoController');
 const OnlineController = require('../controllers/OnlineController');
 
-// ✅ Middleware de configuração do Multer
 const { uploadEvento } = require('../config/multer');
 
 const uploadCamposEvento = uploadEvento.fields([
@@ -15,8 +14,8 @@ const uploadCamposEvento = uploadEvento.fields([
 router.get('/', eventoController.listarTodosEventosParaVitrine);
 router.get('/vitrine', eventoController.listarTodosEventosParaVitrine);
 
-// --- 2. IA & AUTOMAÇÃO (ADICIONE ESTA LINHA) ---
-router.post('/gerar-ia', eventoController.gerarComIA); 
+// --- 2. IA & AUTOMAÇÃO ---
+router.post('/gerar-ia', eventoController.gerarComIA);
 
 // --- 3. ROTAS DE CRIAÇÃO ---
 router.post('/novo-online', uploadCamposEvento, OnlineController.criarEventoOnline);
@@ -31,7 +30,7 @@ router.put('/:id', uploadCamposEvento, eventoController.atualizarEvento);
 
 // --- 6. GESTÃO DE EVENTO ---
 router.delete('/:id', eventoController.excluirEvento);
-router.put('/:id/status', eventoController.atualizarStatus);
+router.patch('/:id/status', eventoController.atualizarStatus);
 
 // --- 7. INGRESSOS ---
 router.post('/:id/ingressos', eventoController.salvarIngressos);
