@@ -161,6 +161,25 @@ const obterImagemFinal = (req, campo, imagemAtual = null) => {
   return imagemFinal;
 };
 
+const parsePreco = (valor) => {
+  if (valor === '' || valor === null || valor === undefined) return 0;
+  if (typeof valor === 'number') return Number.isNaN(valor) ? 0 : valor;
+
+  let raw = String(valor).trim();
+  if (!raw) return 0;
+
+  raw = raw.replace(/[^\d,.-]/g, '');
+
+  if (raw.includes('.') && raw.includes(',')) {
+    raw = raw.replace(/\./g, '').replace(',', '.');
+  } else if (raw.includes(',')) {
+    raw = raw.replace(',', '.');
+  }
+
+  const parsed = parseFloat(raw);
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
 // ========================================
 // 1. LISTAR VITRINE
 // ========================================
@@ -186,7 +205,7 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
         e.taxa_plataforma,
         COALESCE(
           (
-            SELECT MIN(CAST(i.preco AS NUMERIC))
+            SELECT MIN(NULLIF(CAST(i.preco AS NUMERIC), 0))
             FROM public.ingressos i
             WHERE i.evento_id = e.id
           ),
@@ -287,7 +306,8 @@ exports.buscarEventoPorId = async (req, res) => {
 
       evento.ingressos = resIng.rows.map((ing) => ({
         ...ing,
-        moeda: evento.moeda
+        preco: parsePreco(ing.preco),
+        moeda: normalizarMoeda(ing.moeda || evento.moeda, evento.moeda)
       }));
     } catch (ingErr) {
       console.warn('⚠️ Erro ao buscar ingressos:', ingErr.message);
@@ -538,10 +558,12 @@ exports.salvarIngressos = async (req, res) => {
 
     if (ingressos && Array.isArray(ingressos)) {
       for (const ing of ingressos) {
-        const precoFinal =
-          ing.preco === '' || ing.preco === null || ing.preco === undefined
-            ? 0
-            : Number(ing.preco);
+        const precoFinal = parsePreco(
+          ing?.preco ??
+          ing?.valor ??
+          ing?.price ??
+          0
+        );
 
         const quantidadeFinal =
           ing.quantidade === '' || ing.quantidade === null || ing.quantidade === undefined
@@ -556,7 +578,7 @@ exports.salvarIngressos = async (req, res) => {
           [
             id,
             limparCampo(ing.nome, 'Ingresso'),
-            Number.isNaN(precoFinal) ? 0 : precoFinal,
+            precoFinal,
             quantidadeFinal,
             moedaEvento
           ]
