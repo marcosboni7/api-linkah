@@ -145,7 +145,7 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
 };
 
 // ========================================
-// 2. LISTAR POR PRODUTOR (COM PREÇO MÍNIMO)
+// 2. LISTAR POR PRODUTOR (COM IMAGEM CAPA)
 // ========================================
 exports.listarEventosPorProdutor = async (req, res) => {
   const { email } = req.query;
@@ -153,23 +153,47 @@ exports.listarEventosPorProdutor = async (req, res) => {
 
   try {
     const emailLimpo = String(email).replace(/['"]+/g, '').trim().toLowerCase();
+
     const query = `
       SELECT
-        e.id, e.nome, e.produtor_email, e.categoria,
+        e.id,
+        e.nome,
+        e.produtor_email,
+        e.categoria,
+        e.descricao,
+        CASE
+          WHEN e.imagem_capa ILIKE '%undefined%' OR e.imagem_capa ILIKE '%null%' THEN NULL
+          ELSE e.imagem_capa
+        END AS imagem_capa,
         TO_CHAR(e.data_inicio, 'YYYY-MM-DD') AS data_inicio,
-        e.status, e.moeda, e.cidade,
+        e.status,
+        e.moeda,
+        e.cidade,
+        e.local_nome,
         COALESCE(
-          (SELECT MIN(CAST(i.preco AS NUMERIC)) FROM public.ingressos i WHERE i.evento_id = e.id AND CAST(i.preco AS NUMERIC) > 0),
+          (
+            SELECT MIN(CAST(i.preco AS NUMERIC))
+            FROM public.ingressos i
+            WHERE i.evento_id = e.id
+              AND CAST(i.preco AS NUMERIC) > 0
+          ),
           0
         ) AS preco_minimo,
-        EXISTS (SELECT 1 FROM public.ingressos i WHERE i.evento_id = e.id AND CAST(i.preco AS NUMERIC) = 0) AS possui_gratuito
+        EXISTS (
+          SELECT 1
+          FROM public.ingressos i
+          WHERE i.evento_id = e.id
+            AND CAST(i.preco AS NUMERIC) = 0
+        ) AS possui_gratuito
       FROM public.eventos e
-      WHERE e.produtor_email = $1
+      WHERE TRIM(LOWER(e.produtor_email)) = $1
       ORDER BY e.id DESC
     `;
+
     const result = await db.query(query, [emailLimpo]);
     return res.status(200).json(result.rows);
   } catch (err) {
+    console.error('❌ Erro ao listar por produtor:', err);
     return res.status(500).json({ error: err.message });
   }
 };
