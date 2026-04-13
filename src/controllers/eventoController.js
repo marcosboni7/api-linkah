@@ -15,6 +15,7 @@ const CATEGORIAS_VALIDAS = [
 
 const MOEDAS_VALIDAS = ['BRL', 'EUR', 'USD'];
 
+// --- UTILS ---
 const limparCampo = (valor, fallback = '') => {
   if (
     valor === undefined ||
@@ -47,100 +48,42 @@ const normalizarCategoria = (categoria) => {
 };
 
 const normalizarData = (valor) => {
-  if (
-    valor === undefined ||
-    valor === null ||
-    valor === 'undefined' ||
-    valor === 'null' ||
-    String(valor).trim() === ''
-  ) {
-    return null;
-  }
-
+  if (!valor || valor === 'undefined' || valor === 'null') return null;
   const dataRaw = String(valor).trim();
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dataRaw)) {
-    return dataRaw;
-  }
-
-  if (/^\d{4}-\d{2}-\d{2}T/.test(dataRaw)) {
-    return dataRaw.split('T')[0];
-  }
-
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dataRaw)) return dataRaw;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(dataRaw)) return dataRaw.split('T')[0];
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(dataRaw)) {
     const [dia, mes, ano] = dataRaw.split('/');
     return `${ano}-${mes}-${dia}`;
   }
-
-  const matchExtenso = dataRaw.match(
-    /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+(\d{4})/
-  );
-
-  if (matchExtenso) {
-    const meses = {
-      Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06',
-      Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12',
-    };
-
-    const mes = meses[matchExtenso[2]];
-    const dia = String(matchExtenso[3]).padStart(2, '0');
-    const ano = matchExtenso[4];
-
-    return `${ano}-${mes}-${dia}`;
-  }
-
   const d = new Date(dataRaw);
   if (!isNaN(d.getTime())) {
-    const ano = d.getFullYear();
-    const mes = String(d.getMonth() + 1).padStart(2, '0');
-    const dia = String(d.getDate()).padStart(2, '0');
-    return `${ano}-${mes}-${dia}`;
+    return d.toISOString().split('T')[0];
   }
-
   return null;
 };
 
 const normalizarHora = (valor) => {
-  if (
-    !valor ||
-    valor === 'undefined' ||
-    valor === 'null' ||
-    String(valor).trim() === ''
-  ) {
-    return null;
-  }
-
+  if (!valor || valor === 'undefined' || valor === 'null') return null;
   const hora = String(valor).trim();
-
-  if (/^\d{2}:\d{2}$/.test(hora) || /^\d{2}:\d{2}:\d{2}$/.test(hora)) {
-    return hora;
-  }
-
+  if (/^\d{2}:\d{2}$/.test(hora) || /^\d{2}:\d{2}:\d{2}$/.test(hora)) return hora;
   return hora.substring(0, 8);
 };
 
 const normalizarMoeda = (valor, fallback = 'BRL') => {
   const moeda = limparCampo(valor, fallback).toUpperCase();
-
   if (['R$', 'REAL', 'REAIS'].includes(moeda)) return 'BRL';
   if (['€', 'EURO', 'EUROS'].includes(moeda)) return 'EUR';
   if (['$', 'DOLAR', 'DÓLAR', 'DOLARES', 'DÓLARES'].includes(moeda)) return 'USD';
-
   return MOEDAS_VALIDAS.includes(moeda) ? moeda : fallback;
 };
 
 const obterMoedaDoBody = (body = {}, fallback = 'BRL') => {
-  return normalizarMoeda(
-    body.moeda_evento ||
-    body.moeda ||
-    body.currency,
-    fallback
-  );
+  return normalizarMoeda(body.moeda_evento || body.moeda || body.currency, fallback);
 };
 
 const obterImagemFinal = (req, campo, imagemAtual = null) => {
   let imagemFinal = imagemAtual;
-
   if (req.files && req.files[campo]) {
     const file = req.files[campo][0];
     imagemFinal = file.path || file.secure_url || file.url || imagemAtual;
@@ -152,70 +95,47 @@ const obterImagemFinal = (req, campo, imagemAtual = null) => {
       imgBody === 'null' ||
       String(imgBody).includes('/undefined') ||
       String(imgBody).includes('[object Object]');
-
-    if (!isLixo) {
-      imagemFinal = String(imgBody).trim();
-    }
+    if (!isLixo) imagemFinal = String(imgBody).trim();
   }
-
   return imagemFinal;
 };
 
 const parsePreco = (valor) => {
   if (valor === '' || valor === null || valor === undefined) return 0;
   if (typeof valor === 'number') return Number.isNaN(valor) ? 0 : valor;
-
-  let raw = String(valor).trim();
-  if (!raw) return 0;
-
-  raw = raw.replace(/[^\d,.-]/g, '');
-
+  let raw = String(valor).trim().replace(/[^\d,.-]/g, '');
   if (raw.includes('.') && raw.includes(',')) {
     raw = raw.replace(/\./g, '').replace(',', '.');
   } else if (raw.includes(',')) {
     raw = raw.replace(',', '.');
   }
-
   const parsed = parseFloat(raw);
   return Number.isNaN(parsed) ? 0 : parsed;
 };
 
 // ========================================
-// 1. LISTAR VITRINE
+// 1. LISTAR VITRINE (CORRIGIDO)
 // ========================================
 exports.listarTodosEventosParaVitrine = async (req, res) => {
   try {
     const query = `
       SELECT
-        e.id,
-        e.nome,
+        e.id, e.nome,
         CASE
           WHEN e.imagem_capa ILIKE '%undefined%' OR e.imagem_capa ILIKE '%null%' THEN NULL
           ELSE e.imagem_capa
         END AS imagem_capa,
         TO_CHAR(e.data_inicio, 'YYYY-MM-DD') AS data_inicio,
-        e.hora_inicio,
-        e.local_nome,
-        e.cidade,
-        e.estado,
-        e.categoria,
-        e.tipo,
-        e.status,
-        e.moeda,
-        e.taxa_plataforma,
+        e.hora_inicio, e.local_nome, e.cidade, e.estado, e.categoria, e.tipo, e.status, e.moeda,
         COALESCE(
-          (
-            SELECT MIN(NULLIF(CAST(i.preco AS NUMERIC), 0))
-            FROM public.ingressos i
-            WHERE i.evento_id = e.id
-          ),
+          (SELECT MIN(CAST(i.preco AS NUMERIC)) FROM public.ingressos i WHERE i.evento_id = e.id AND CAST(i.preco AS NUMERIC) > 0),
           0
-        ) AS preco_minimo
+        ) AS preco_minimo,
+        EXISTS (SELECT 1 FROM public.ingressos i WHERE i.evento_id = e.id AND CAST(i.preco AS NUMERIC) = 0) AS possui_gratuito
       FROM public.eventos e
       WHERE e.status ILIKE 'Ativo'
       ORDER BY e.id DESC
     `;
-
     const result = await db.query(query);
     return res.status(200).json(result.rows);
   } catch (err) {
@@ -225,7 +145,7 @@ exports.listarTodosEventosParaVitrine = async (req, res) => {
 };
 
 // ========================================
-// 2. LISTAR POR PRODUTOR
+// 2. LISTAR POR PRODUTOR (COM PREÇO MÍNIMO)
 // ========================================
 exports.listarEventosPorProdutor = async (req, res) => {
   const { email } = req.query;
@@ -235,24 +155,17 @@ exports.listarEventosPorProdutor = async (req, res) => {
     const emailLimpo = String(email).replace(/['"]+/g, '').trim().toLowerCase();
     const query = `
       SELECT
-        id, nome, produtor_email, usuario_nome, categoria, descricao,
-        TO_CHAR(data_inicio, 'YYYY-MM-DD') AS data_inicio,
-        hora_inicio,
-        TO_CHAR(data_termino, 'YYYY-MM-DD') AS data_termino,
-        hora_termino,
-        local_nome, cep, endereco, numero, complemento, cidade, estado, capacidade,
-        CASE
-          WHEN imagem_capa ILIKE '%undefined%' OR imagem_capa ILIKE '%null%' THEN NULL
-          ELSE imagem_capa
-        END AS imagem_capa,
-        CASE
-          WHEN banner_patrocinio ILIKE '%undefined%' OR banner_patrocinio ILIKE '%null%' THEN NULL
-          ELSE banner_patrocinio
-        END AS banner_patrocinio,
-        tipo, status, moeda, regras, visibilidade, link_reuniao, taxa_plataforma
-      FROM public.eventos
-      WHERE produtor_email = $1
-      ORDER BY id DESC
+        e.id, e.nome, e.produtor_email, e.categoria,
+        TO_CHAR(e.data_inicio, 'YYYY-MM-DD') AS data_inicio,
+        e.status, e.moeda, e.cidade,
+        COALESCE(
+          (SELECT MIN(CAST(i.preco AS NUMERIC)) FROM public.ingressos i WHERE i.evento_id = e.id AND CAST(i.preco AS NUMERIC) > 0),
+          0
+        ) AS preco_minimo,
+        EXISTS (SELECT 1 FROM public.ingressos i WHERE i.evento_id = e.id AND CAST(i.preco AS NUMERIC) = 0) AS possui_gratuito
+      FROM public.eventos e
+      WHERE e.produtor_email = $1
+      ORDER BY e.id DESC
     `;
     const result = await db.query(query, [emailLimpo]);
     return res.status(200).json(result.rows);
@@ -266,53 +179,46 @@ exports.listarEventosPorProdutor = async (req, res) => {
 // ========================================
 exports.buscarEventoPorId = async (req, res) => {
   const { id } = req.params;
-
   try {
     const query = `
-      SELECT
-        e.*,
+      SELECT e.*, 
         TO_CHAR(e.data_inicio, 'YYYY-MM-DD') AS data_inicio,
         TO_CHAR(e.data_termino, 'YYYY-MM-DD') AS data_termino,
-        CASE
-          WHEN e.imagem_capa ILIKE '%undefined%' OR e.imagem_capa ILIKE '%null%' THEN NULL
-          ELSE e.imagem_capa
-        END AS imagem_capa,
-        CASE
-          WHEN e.banner_patrocinio ILIKE '%undefined%' OR e.banner_patrocinio ILIKE '%null%' THEN NULL
-          ELSE e.banner_patrocinio
-        END AS banner_patrocinio,
-        p.nome AS produtor_nome,
-        p.foto_perfil AS produtor_foto
+        p.nome AS produtor_nome, p.foto_perfil AS produtor_foto
       FROM public.eventos e
-      LEFT JOIN public.produtores p
-        ON TRIM(LOWER(e.produtor_email)) = TRIM(LOWER(p.email))
+      LEFT JOIN public.produtores p ON TRIM(LOWER(e.produtor_email)) = TRIM(LOWER(p.email))
       WHERE e.id = $1
     `;
-
     const result = await db.query(query, [id]);
-
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Evento não encontrado' });
     }
 
     const evento = result.rows[0];
-    evento.moeda = normalizarMoeda(evento.moeda, 'BRL');
 
-    try {
-      const resIng = await db.query(
-        'SELECT * FROM public.ingressos WHERE evento_id = $1 ORDER BY preco ASC',
-        [id]
-      );
+    const resIng = await db.query(
+      `
+      SELECT
+        id,
+        evento_id,
+        nome,
+        descricao,
+        preco,
+        quantidade,
+        moeda
+      FROM public.ingressos
+      WHERE evento_id = $1
+      ORDER BY preco ASC
+      `,
+      [id]
+    );
 
-      evento.ingressos = resIng.rows.map((ing) => ({
-        ...ing,
-        preco: parsePreco(ing.preco),
-        moeda: normalizarMoeda(ing.moeda || evento.moeda, evento.moeda)
-      }));
-    } catch (ingErr) {
-      console.warn('⚠️ Erro ao buscar ingressos:', ingErr.message);
-      evento.ingressos = [];
-    }
+    evento.ingressos = resIng.rows.map((ing) => ({
+      ...ing,
+      descricao: limparCampo(ing.descricao, ''),
+      preco: parsePreco(ing.preco),
+      moeda: normalizarMoeda(ing.moeda || evento.moeda, evento.moeda),
+    }));
 
     return res.status(200).json(evento);
   } catch (err) {
@@ -326,31 +232,6 @@ exports.buscarEventoPorId = async (req, res) => {
 exports.criarEventoPresencial = async (req, res) => {
   const imagemFinal = obterImagemFinal(req, 'imagem_capa');
   const bannerFinal = obterImagemFinal(req, 'banner_patrocinio');
-
-  const {
-    nome,
-    produtor_email,
-    usuario_nome,
-    categoria,
-    descricao,
-    data_inicio,
-    hora_inicio,
-    data_termino,
-    hora_termino,
-    local_nome,
-    cep,
-    endereco,
-    numero,
-    complemento,
-    cidade,
-    estado,
-    capacidade,
-    tipo,
-    regras,
-    visibilidade,
-    taxa_plataforma
-  } = req.body;
-
   const moedaFinal = obterMoedaDoBody(req.body, 'BRL');
 
   try {
@@ -361,46 +242,38 @@ exports.criarEventoPresencial = async (req, res) => {
         complemento, cidade, estado, capacidade, imagem_capa, banner_patrocinio, tipo, status,
         moeda, regras, visibilidade, taxa_plataforma
       )
-      VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
-      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
       RETURNING id
     `;
-
     const values = [
-      limparCampo(nome, 'Novo Evento'),
-      normalizarEmail(produtor_email),
-      limparCampo(usuario_nome, 'Admin'),
-      normalizarCategoria(categoria),
-      limparCampo(descricao, ''),
-      normalizarData(data_inicio),
-      normalizarHora(hora_inicio),
-      normalizarData(data_termino),
-      normalizarHora(hora_termino),
-      limparCampo(local_nome, ''),
-      limparCampo(cep, ''),
-      limparCampo(endereco, ''),
-      limparCampo(numero, ''),
-      limparCampo(complemento, ''),
-      limparCampo(cidade, ''),
-      limparCampo(estado, ''),
-      limparNumero(capacidade, 0),
+      limparCampo(req.body.nome, 'Novo Evento'),
+      normalizarEmail(req.body.produtor_email),
+      limparCampo(req.body.usuario_nome, 'Admin'),
+      normalizarCategoria(req.body.categoria),
+      limparCampo(req.body.descricao, ''),
+      normalizarData(req.body.data_inicio),
+      normalizarHora(req.body.hora_inicio),
+      normalizarData(req.body.data_termino),
+      normalizarHora(req.body.hora_termino),
+      limparCampo(req.body.local_nome, ''),
+      limparCampo(req.body.cep, ''),
+      limparCampo(req.body.endereco, ''),
+      limparCampo(req.body.numero, ''),
+      limparCampo(req.body.complemento, ''),
+      limparCampo(req.body.cidade, ''),
+      limparCampo(req.body.estado, ''),
+      limparNumero(req.body.capacidade, 0),
       imagemFinal,
       bannerFinal,
-      limparCampo(tipo, 'Presencial'),
+      limparCampo(req.body.tipo, 'Presencial'),
       'Ativo',
       moedaFinal,
-      limparCampo(regras, ''),
-      limparCampo(visibilidade, 'Publico'),
-      parseFloat(taxa_plataforma || 0.05)
+      limparCampo(req.body.regras, ''),
+      limparCampo(req.body.visibilidade, 'Publico'),
+      parseFloat(req.body.taxa_plataforma || 0.05),
     ];
-
     const result = await db.query(query, values);
-    return res.status(201).json({
-      message: 'Evento criado!',
-      id: result.rows[0].id,
-      moeda: moedaFinal
-    });
+    return res.status(201).json({ message: 'Evento criado!', id: result.rows[0].id });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -411,10 +284,8 @@ exports.criarEventoPresencial = async (req, res) => {
 // ========================================
 exports.atualizarEvento = async (req, res) => {
   const { id } = req.params;
-
   try {
     const check = await db.query('SELECT * FROM public.eventos WHERE id = $1', [id]);
-
     if (check.rowCount === 0) {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
@@ -422,87 +293,44 @@ exports.atualizarEvento = async (req, res) => {
     const atual = check.rows[0];
     const imagemFinal = obterImagemFinal(req, 'imagem_capa', atual.imagem_capa);
     const bannerFinal = obterImagemFinal(req, 'banner_patrocinio', atual.banner_patrocinio);
+    const moedaFinal = obterMoedaDoBody(req.body, atual.moeda);
 
-    const dataInicioFinal =
-      req.body.data_inicio !== undefined
-        ? normalizarData(req.body.data_inicio)
-        : normalizarData(atual.data_inicio);
-
-    const dataTerminoFinal =
-      req.body.data_termino !== undefined
-        ? normalizarData(req.body.data_termino)
-        : normalizarData(atual.data_termino);
-
-    const moedaFinal = obterMoedaDoBody(req.body, normalizarMoeda(atual.moeda || 'BRL'));
-
-    const taxaFinal =
-      req.body.taxa_plataforma !== undefined &&
-      req.body.taxa_plataforma !== null &&
-      req.body.taxa_plataforma !== ''
-        ? parseFloat(req.body.taxa_plataforma)
-        : parseFloat(atual.taxa_plataforma || 0.05);
-
+    const queryUpdate = `
+      UPDATE public.eventos SET
+        nome=$1, categoria=$2, descricao=$3, data_inicio=$4, hora_inicio=$5, data_termino=$6, hora_termino=$7,
+        local_nome=$8, cep=$9, endereco=$10, numero=$11, complemento=$12, cidade=$13, estado=$14,
+        capacidade=$15, imagem_capa=$16, banner_patrocinio=$17, tipo=$18, status=$19, moeda=$20,
+        regras=$21, visibilidade=$22, link_reuniao=$23, usuario_nome=$24, taxa_plataforma=$25
+      WHERE id = $26 RETURNING *
+    `;
     const values = [
       limparCampo(req.body.nome, atual.nome),
       normalizarCategoria(req.body.categoria || atual.categoria),
       limparCampo(req.body.descricao, atual.descricao),
-      dataInicioFinal,
+      normalizarData(req.body.data_inicio ?? atual.data_inicio),
       normalizarHora(req.body.hora_inicio ?? atual.hora_inicio),
-      dataTerminoFinal,
+      normalizarData(req.body.data_termino ?? atual.data_termino),
       normalizarHora(req.body.hora_termino ?? atual.hora_termino),
-      limparCampo(req.body.local_nome, atual.local_nome || ''),
-      limparCampo(req.body.cep, atual.cep || ''),
-      limparCampo(req.body.endereco, atual.endereco || ''),
-      limparCampo(req.body.numero, atual.numero || ''),
-      limparCampo(req.body.complemento, atual.complemento || ''),
-      limparCampo(req.body.cidade, atual.cidade || ''),
-      limparCampo(req.body.estado, atual.estado || ''),
-      limparNumero(req.body.capacidade, atual.capacidade || 0),
+      limparCampo(req.body.local_nome, atual.local_nome),
+      limparCampo(req.body.cep, atual.cep),
+      limparCampo(req.body.endereco, atual.endereco),
+      limparCampo(req.body.numero, atual.numero),
+      limparCampo(req.body.complemento, atual.complemento),
+      limparCampo(req.body.cidade, atual.cidade),
+      limparCampo(req.body.estado, atual.estado),
+      limparNumero(req.body.capacidade, atual.capacidade),
       imagemFinal,
       bannerFinal,
-      limparCampo(req.body.tipo, atual.tipo || 'Presencial'),
-      limparCampo(req.body.status, atual.status || 'Ativo'),
+      limparCampo(req.body.tipo, atual.tipo),
+      limparCampo(req.body.status, atual.status),
       moedaFinal,
-      limparCampo(req.body.regras, atual.regras || ''),
-      limparCampo(req.body.visibilidade, atual.visibilidade || 'Publico'),
-      limparCampo(req.body.link_reuniao, atual.link_reuniao || ''),
+      limparCampo(req.body.regras, atual.regras),
+      limparCampo(req.body.visibilidade, atual.visibilidade),
+      limparCampo(req.body.link_reuniao, atual.link_reuniao),
       limparCampo(req.body.usuario_nome, atual.usuario_nome),
-      taxaFinal,
-      id
+      parseFloat(req.body.taxa_plataforma ?? atual.taxa_plataforma),
+      id,
     ];
-
-    const queryUpdate = `
-      UPDATE public.eventos
-      SET
-        nome = $1,
-        categoria = $2,
-        descricao = $3,
-        data_inicio = $4,
-        hora_inicio = $5,
-        data_termino = $6,
-        hora_termino = $7,
-        local_nome = $8,
-        cep = $9,
-        endereco = $10,
-        numero = $11,
-        complemento = $12,
-        cidade = $13,
-        estado = $14,
-        capacidade = $15,
-        imagem_capa = $16,
-        banner_patrocinio = $17,
-        tipo = $18,
-        status = $19,
-        moeda = $20,
-        regras = $21,
-        visibilidade = $22,
-        link_reuniao = $23,
-        usuario_nome = $24,
-        taxa_plataforma = $25
-      WHERE id = $26
-      RETURNING *
-    `;
-
     const result = await db.query(queryUpdate, values);
 
     await db.query(
@@ -510,12 +338,8 @@ exports.atualizarEvento = async (req, res) => {
       [moedaFinal, id]
     );
 
-    return res.status(200).json({
-      message: 'Atualizado!',
-      evento: result.rows[0]
-    });
+    return res.status(200).json({ message: 'Atualizado!', evento: result.rows[0] });
   } catch (err) {
-    console.error('❌ ERRO NO UPDATE:', err.message);
     return res.status(500).json({ error: err.message });
   }
 };
@@ -525,7 +349,6 @@ exports.atualizarEvento = async (req, res) => {
 // ========================================
 exports.excluirEvento = async (req, res) => {
   const { id } = req.params;
-
   try {
     await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
     await db.query('DELETE FROM public.eventos WHERE id = $1', [id]);
@@ -543,44 +366,40 @@ exports.salvarIngressos = async (req, res) => {
   const { ingressos } = req.body;
 
   try {
-    const eventoResult = await db.query(
-      'SELECT moeda FROM public.eventos WHERE id = $1 LIMIT 1',
+    const ev = await db.query(
+      'SELECT moeda FROM public.eventos WHERE id = $1',
       [id]
     );
 
-    if (eventoResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Evento não encontrado.' });
+    if (ev.rows.length === 0) {
+      return res.status(404).json({ error: 'Evento não encontrado' });
     }
 
-    const moedaEvento = normalizarMoeda(eventoResult.rows[0].moeda, 'BRL');
+    const moedaEvento = normalizarMoeda(ev.rows[0].moeda, 'BRL');
 
     await db.query('DELETE FROM public.ingressos WHERE evento_id = $1', [id]);
 
     if (ingressos && Array.isArray(ingressos)) {
       for (const ing of ingressos) {
-        const precoFinal = parsePreco(
-          ing?.preco ??
-          ing?.valor ??
-          ing?.price ??
-          0
-        );
-
-        const quantidadeFinal =
-          ing.quantidade === '' || ing.quantidade === null || ing.quantidade === undefined
-            ? 0
-            : limparNumero(ing.quantidade, 0);
-
         await db.query(
           `
-            INSERT INTO public.ingressos (evento_id, nome, preco, quantidade, moeda)
-            VALUES ($1, $2, $3, $4, $5)
+          INSERT INTO public.ingressos (
+            evento_id,
+            nome,
+            descricao,
+            preco,
+            quantidade,
+            moeda
+          )
+          VALUES ($1, $2, $3, $4, $5, $6)
           `,
           [
             id,
             limparCampo(ing.nome, 'Ingresso'),
-            precoFinal,
-            quantidadeFinal,
-            moedaEvento
+            limparCampo(ing.descricao, ''),
+            parsePreco(ing.preco),
+            limparNumero(ing.quantidade, 0),
+            moedaEvento,
           ]
         );
       }
@@ -588,10 +407,9 @@ exports.salvarIngressos = async (req, res) => {
 
     return res.status(200).json({
       message: 'Salvo!',
-      moeda: moedaEvento
+      moeda: moedaEvento,
     });
   } catch (err) {
-    console.error('❌ Erro ao salvar ingressos:', err.message);
     return res.status(500).json({ error: err.message });
   }
 };
@@ -602,7 +420,6 @@ exports.salvarIngressos = async (req, res) => {
 exports.atualizarStatus = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
-
   try {
     await db.query('UPDATE public.eventos SET status = $1 WHERE id = $2', [status, id]);
     return res.status(200).json({ message: 'Status OK' });
@@ -616,48 +433,27 @@ exports.atualizarStatus = async (req, res) => {
 // ========================================
 exports.gerarComIA = async (req, res) => {
   const { texto } = req.body;
-
-  if (!texto) {
-    return res.status(400).json({ error: 'Forneça um texto para a IA processar.' });
-  }
+  if (!texto) return res.status(400).json({ error: 'Forneça um texto.' });
 
   try {
-    const chatCompletion = await groq.chat.completions.create({
+    const chat = await groq.chat.completions.create({
       messages: [
-        {
-          role: "system",
-          content: `Você é um assistente de cadastro de eventos para a plataforma Linkah.
-           Analise o texto e extraia as informações para um formulário.
-           Hoje é ${new Date().toLocaleDateString('pt-BR')}.
-           Categorias permitidas: ${CATEGORIAS_VALIDAS.join(', ')}.
-
-           Retorne APENAS um JSON puro com os campos:
-           nome, categoria, descricao, data_inicio (YYYY-MM-DD), hora_inicio (HH:MM), data_termino (YYYY-MM-DD ou null), hora_termino (HH:MM ou null), local_nome, cidade, estado (Sigla UF), cep, capacidade (Number), preco_sugerido (Number).`
-        },
-        {
-          role: "user",
-          content: texto,
-        },
+        { role: "system", content: "Retorne APENAS JSON puro para cadastro de evento." },
+        { role: "user", content: texto }
       ],
       model: "llama-3.3-70b-versatile",
       response_format: { type: "json_object" },
     });
 
-    const data = JSON.parse(chatCompletion.choices[0].message.content);
+    const data = JSON.parse(chat.choices[0].message.content);
 
-    const formatado = {
+    return res.status(200).json({
       ...data,
       categoria: normalizarCategoria(data.categoria),
       data_inicio: normalizarData(data.data_inicio),
       hora_inicio: normalizarHora(data.hora_inicio),
-      data_termino: normalizarData(data.data_termino),
-      hora_termino: normalizarHora(data.hora_termino),
-      capacidade: limparNumero(data.capacidade, 0)
-    };
-
-    return res.status(200).json(formatado);
+    });
   } catch (err) {
-    console.error('❌ Erro na IA Groq:', err.message);
-    return res.status(500).json({ error: 'Falha ao processar texto com IA gratuita.' });
+    return res.status(500).json({ error: 'IA falhou.' });
   }
 };
