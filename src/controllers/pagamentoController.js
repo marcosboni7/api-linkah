@@ -10,7 +10,10 @@ const { enviarIngressoEmail } = require('../services/emailService');
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://linkah.eu';
 
-// --- FUNÇÕES AUXILIARES DE SEGURANÇA ---
+// ======================================================
+// FUNÇÕES AUXILIARES
+// ======================================================
+
 function isValidHttpUrl(value) {
   try {
     const url = new URL(value);
@@ -42,14 +45,57 @@ function getErrorMessage(err) {
   return 'Erro interno no servidor de pagamentos';
 }
 
-// --- 1. CRIAR SESSÃO DE CHECKOUT (COM TAXA DINÂMICA DA STAFF) ---
+function normalizeCurrency(input) {
+  if (input === null || input === undefined) return 'brl';
+
+  const raw = String(input).trim().toUpperCase();
+
+  if (['R$', 'REAL', 'REAIS', 'BRL'].includes(raw)) return 'brl';
+  if (['€', 'EURO', 'EUROS', 'EUR'].includes(raw)) return 'eur';
+  if (['$', 'DOLAR', 'DÓLAR', 'DOLARES', 'DÓLARES', 'USD'].includes(raw)) return 'usd';
+
+  return 'brl';
+}
+
+function formatDateBR(dateValue) {
+  try {
+    if (!dateValue) return 'Data a definir';
+    return new Date(dateValue).toLocaleDateString('pt-BR');
+  } catch {
+    return 'Data a definir';
+  }
+}
+
+function parseQuantidades(rawQuantidades) {
+  const resultado = {};
+
+  if (!rawQuantidades || typeof rawQuantidades !== 'object' || Array.isArray(rawQuantidades)) {
+    return resultado;
+  }
+
+  for (const [key, value] of Object.entries(rawQuantidades)) {
+    const id = String(key).trim();
+    const qtd = safeInt(value, 0);
+
+    if (id && qtd > 0) {
+      resultado[id] = qtd;
+    }
+  }
+
+  return resultado;
+}
+
+// ======================================================
+// 1. CRIAR SESSÃO DE CHECKOUT
+// ======================================================
+
 exports.criarSessaoCheckout = async (req, res) => {
   try {
     if (!process.env.STRIPE_SECRET_KEY) {
       return res.status(500).json({ error: 'STRIPE_SECRET_KEY não configurada.' });
     }
 
-    const { evento, usuarioEmail, quantidade } = req.body;
+    const { evento, usuarioEmail, usuarioNome, quantidade, quantidades } = req.body;
     const baseUrl = FRONTEND_URL;
 
     if (!isValidHttpUrl(baseUrl)) {
@@ -60,17 +106,33 @@ exports.criarSessaoCheckout = async (req, res) => {
       return res.status(400).json({ error: 'ID do evento não informado.' });
     }
 
-    const quantidadeFinal = safeInt(quantidade, 1);
+    if (!usuarioEmail) {
+      return res.status(400).json({ error: 'E-mail do comprador não informado.' });
+    }
 
-    // SQL ATUALIZADO: Inclui e.taxa_plataforma que a Staff define
+    const quantidadesSelecionadas = parseQuantidades(quantidades);
+
+    // ------------------------------------------------------
+    // Busca dados do evento
+    // ------------------------------------------------------
     const dadosEventoBD = await db.query(
       `SELECT 
-        e.id, e.nome, e.data_inicio, e.hora_inicio, e.local_nome, e.preco, e.tipo, e.link_reuniao, e.moeda, e.taxa_plataforma,
-        COALESCE(p.stripe_account_id, u.stripe_account_id) as stripe_account_id
-       FROM public.eventos e
-       LEFT JOIN public.produtores p ON e.produtor_email = p.email 
-       LEFT JOIN public.usuarios u ON e.produtor_email = u.email
-       WHERE e.id = $1`,
+        e.id,
+        e.nome,
+        e.data_inicio,
+        e.hora_inicio,
+        e.local_nome,
+        e.preco,
+        e.tipo,
+        e.link_reuniao,
+        e.moeda,
+        e.taxa_plataforma,
+        COALESCE(p.stripe_account_id, u.stripe_account_id) AS stripe_account_id
+      FROM public.eventos e
+      LEFT JOIN public.produtores p ON e.produtor_email = p.email
+      LEFT JOIN public.usuarios u ON e.produtor_email = u.email
+      WHERE e.id = $1
+      LIMIT 1`,
       [evento.id]
     );
 
@@ -80,24 +142,126 @@ exports.criarSessaoCheckout = async (req, res) => {
 
     const ev = dadosEventoBD.rows[0];
 
-    // DEFINIÇÃO DE PREÇO E MOEDA (Lendo do Banco)
-    const moedaFinal = safeString(ev.moeda || 'brl', 'brl').toLowerCase();
-    const precoUnitario = safeNumber(ev.preco, 0); // Prioridade total ao preço do Banco
+    // ------------------------------------------------------
+    // Busca ingressos do evento
+    // ------------------------------------------------------
+    const ingressosBD = await db.query(
+      `SELECT 
+        id,
+        nome,
+        preco,
+        moeda
+      FROM public.ingressos
+      WHERE evento_id = $1
+      ORDER BY id ASC`,
+      [evento.id]
+    );
 
-    if (precoUnitario <= 0) {
-      return res.status(400).json({ error: 'Este evento não tem um preço válido configurado no banco.' });
+    const ingressos = Array.isArray(ingressosBD.rows) ? ingressosBD.rows : [];
+    const existeSelecaoDeIngressos = Object.keys(quantidadesSelecionadas).length > 0;
+    const eventoTemIngressos = ingressos.length > 0;
+
+    let moedaFinal = normalizeCurrency(ev.moeda || evento?.moeda || 'BRL');
+    let totalFinal = 0;
+    let quantidadeFinal = 0;
+    let descricaoItens = [];
+    let metadataIngressos = [];
+
+    // ------------------------------------------------------
+    // CENÁRIO 1: evento com ingressos e usuário selecionou ingressos
+    // ------------------------------------------------------
+    if (eventoTemIngressos && existeSelecaoDeIngressos) {
+      const mapaIngressos = new Map();
+
+      for (const ing of ingressos) {
+        mapaIngressos.set(String(ing.id), ing);
+      }
+
+      for (const [ingressoId, qtd] of Object.entries(quantidadesSelecionadas)) {
+        const ingresso = mapaIngressos.get(String(ingressoId));
+
+        if (!ingresso) {
+          continue;
+        }
+
+        const precoUnitario = safeNumber(ingresso.preco, 0);
+        const moedaIngresso = normalizeCurrency(ingresso.moeda || ev.moeda || 'BRL');
+
+        if (precoUnitario <= 0) {
+          continue;
+        }
+
+        // Garante moeda única no checkout
+        if (quantidadeFinal === 0) {
+          moedaFinal = moedaIngresso;
+        } else if (moedaIngresso !== moedaFinal) {
+          return res.status(400).json({
+            error: 'Os ingressos selecionados possuem moedas diferentes. Ajuste os ingressos antes de continuar.',
+          });
+        }
+
+        totalFinal += precoUnitario * qtd;
+        quantidadeFinal += qtd;
+
+        descricaoItens.push(`${qtd}x ${safeString(ingresso.nome, 'Ingresso')}`);
+        metadataIngressos.push({
+          id: String(ingresso.id),
+          nome: safeString(ingresso.nome, 'Ingresso'),
+          quantidade: qtd,
+          preco: precoUnitario,
+          moeda: moedaIngresso.toUpperCase(),
+        });
+      }
+
+      if (quantidadeFinal <= 0 || totalFinal <= 0) {
+        return res.status(400).json({
+          error: 'Nenhum ingresso válido com preço configurado foi selecionado.',
+        });
+      }
+    } else {
+      // ------------------------------------------------------
+      // CENÁRIO 2: fallback para evento simples sem tabela de ingressos
+      // ------------------------------------------------------
+      const precoEvento = safeNumber(ev.preco, 0);
+      quantidadeFinal = safeInt(quantidade, 1);
+      moedaFinal = normalizeCurrency(ev.moeda || evento?.moeda || 'BRL');
+
+      if (precoEvento <= 0) {
+        return res.status(400).json({
+          error: 'Este evento não tem um preço válido configurado no banco.',
+        });
+      }
+
+      if (quantidadeFinal <= 0) {
+        return res.status(400).json({
+          error: 'Quantidade inválida para o checkout.',
+        });
+      }
+
+      totalFinal = precoEvento * quantidadeFinal;
+      descricaoItens.push(`${quantidadeFinal}x Ingresso`);
     }
 
-    const precoFinalEmCentavos = Math.round(precoUnitario * 100);
+    const totalEmCentavos = Math.round(totalFinal * 100);
 
-    // Validação mínima do Stripe (0.50)
-    if (precoFinalEmCentavos < 50) {
-      return res.status(400).json({ error: `O valor total deve ser pelo menos 0.50 ${moedaFinal.toUpperCase()}.` });
+    if (totalEmCentavos < 50) {
+      return res.status(400).json({
+        error: `O valor total deve ser pelo menos 0.50 ${moedaFinal.toUpperCase()}.`,
+      });
     }
 
-    const dataEventoFormatada = ev.data_inicio
-      ? new Date(ev.data_inicio).toLocaleDateString('pt-BR')
-      : 'Data a definir';
+    const dataEventoFormatada = formatDateBR(ev.data_inicio);
+    const horaEvento = safeString(ev.hora_inicio, 'Horário a definir');
+    const localEvento =
+      safeString(ev.local_nome) ||
+      (safeString(ev.tipo).toLowerCase() === 'online'
+        ? safeString(ev.link_reuniao, 'Evento online')
+        : 'Local a definir');
+
+    const descricaoStripe =
+      descricaoItens.length > 0
+        ? descricaoItens.join(' | ')
+        : `Data: ${dataEventoFormatada}`;
 
     const sessionParams = {
       payment_method_types: ['card'],
@@ -108,57 +272,101 @@ exports.criarSessaoCheckout = async (req, res) => {
             currency: moedaFinal,
             product_data: {
               name: `Ingresso: ${safeString(ev.nome, 'Evento')}`,
-              description: `Data: ${dataEventoFormatada}`,
+              description: descricaoStripe,
             },
-            unit_amount: precoFinalEmCentavos,
+            unit_amount: totalEmCentavos,
           },
-          quantity: quantidadeFinal,
+          quantity: 1,
         },
       ],
       mode: 'payment',
       metadata: {
         usuarioEmail: safeString(usuarioEmail),
+        usuarioNome: safeString(usuarioNome),
         eventoId: safeString(ev.id),
         tituloEvento: safeString(ev.nome, 'Evento'),
         quantidade: safeString(quantidadeFinal),
         moeda: moedaFinal.toUpperCase(),
-        taxaAplicada: safeString(ev.taxa_plataforma || '0.05') 
+        taxaAplicada: safeString(ev.taxa_plataforma || '0.05'),
+        dataEvento: safeString(dataEventoFormatada, 'Data a confirmar'),
+        horaEvento: safeString(horaEvento, 'Horário a confirmar'),
+        localEvento: safeString(localEvento, 'Local a definir'),
+        tipoEvento: safeString(ev.tipo, 'presencial'),
+        itensResumo: safeString(descricaoItens.join(' | ')),
+        valorTotal: safeString(totalFinal),
+        ingressosJson: JSON.stringify(metadataIngressos).slice(0, 490),
       },
       success_url: `${baseUrl}/pagamento/sucesso?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${baseUrl}/venda?eventoId=${ev.id}&qtd=${quantidadeFinal}`,
+      cancel_url: `${baseUrl}/venda?eventoId=${ev.id}`,
     };
 
-    // --- LÓGICA DE DIVISÃO DE VALORES (95/5 ou conforme STAFF) ---
+    // ------------------------------------------------------
+    // Split Stripe Connect
+    // ------------------------------------------------------
     if (ev.stripe_account_id) {
-      // Puxa a taxa do banco (default 5% se estiver nulo)
       const taxaStaff = safeNumber(ev.taxa_plataforma, 0.05);
-      
-      const valorTotalVenda = precoFinalEmCentavos * quantidadeFinal;
-      const comissaoLinkah = Math.round(valorTotalVenda * taxaStaff);
+      const comissaoLinkah = Math.round(totalEmCentavos * taxaStaff);
 
       sessionParams.payment_intent_data = {
         application_fee_amount: comissaoLinkah,
         transfer_data: { destination: ev.stripe_account_id },
       };
-      
-      console.log(`✅ Checkout: Venda de ${moedaFinal} ${precoUnitario}. Taxa Linkah: ${taxaStaff * 100}%`);
+
+      console.log(
+        `✅ Checkout Connect | Evento: ${ev.id} | Total: ${moedaFinal.toUpperCase()} ${totalFinal} | Taxa Linkah: ${taxaStaff * 100}%`
+      );
+    } else {
+      console.log(
+        `✅ Checkout padrão | Evento: ${ev.id} | Total: ${moedaFinal.toUpperCase()} ${totalFinal}`
+      );
     }
 
-    const session = await stripe.checkout.sessions.create(sessionParams);
-    return res.json({ url: session.url });
+    console.log('🧾 Checkout payload recebido:', {
+      eventoId: evento?.id,
+      usuarioEmail,
+      usuarioNome,
+      quantidade,
+      quantidadesSelecionadas,
+      totalFinal,
+      quantidadeFinal,
+      moedaFinal,
+    });
 
+    const session = await stripe.checkout.sessions.create(sessionParams);
+
+    return res.json({
+      url: session.url,
+      total: totalFinal,
+      quantidade: quantidadeFinal,
+      moeda: moedaFinal.toUpperCase(),
+    });
   } catch (err) {
     console.error('❌ Erro Stripe Checkout:', err);
     return res.status(500).json({ error: getErrorMessage(err) });
   }
 };
 
-// --- 2. VINCULAR CONTA DO PRODUTOR (MANTIDO) ---
+// ======================================================
+// 2. VINCULAR CONTA DO PRODUTOR
+// ======================================================
+
 exports.vincularContaStripe = async (req, res) => {
   try {
     const { email } = req.body;
-    const produtorResult = await db.query('SELECT stripe_account_id FROM public.produtores WHERE email = $1 LIMIT 1', [email]);
-    const usuarioResult = await db.query('SELECT stripe_account_id FROM public.usuarios WHERE email = $1 LIMIT 1', [email]);
+
+    if (!email) {
+      return res.status(400).json({ error: 'E-mail não informado.' });
+    }
+
+    const produtorResult = await db.query(
+      'SELECT stripe_account_id FROM public.produtores WHERE email = $1 LIMIT 1',
+      [email]
+    );
+
+    const usuarioResult = await db.query(
+      'SELECT stripe_account_id FROM public.usuarios WHERE email = $1 LIMIT 1',
+      [email]
+    );
 
     const registro = produtorResult.rows[0] || usuarioResult.rows[0];
     let stripeAccountId = registro?.stripe_account_id || null;
@@ -167,11 +375,23 @@ exports.vincularContaStripe = async (req, res) => {
       const account = await stripe.accounts.create({
         type: 'express',
         email,
-        capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
+        },
       });
+
       stripeAccountId = account.id;
-      await db.query('UPDATE public.produtores SET stripe_account_id = $1 WHERE email = $2', [stripeAccountId, email]);
-      await db.query('UPDATE public.usuarios SET stripe_account_id = $1 WHERE email = $2', [stripeAccountId, email]);
+
+      await db.query(
+        'UPDATE public.produtores SET stripe_account_id = $1 WHERE email = $2',
+        [stripeAccountId, email]
+      );
+
+      await db.query(
+        'UPDATE public.usuarios SET stripe_account_id = $1 WHERE email = $2',
+        [stripeAccountId, email]
+      );
     }
 
     const accountLink = await stripe.accountLinks.create({
@@ -183,18 +403,33 @@ exports.vincularContaStripe = async (req, res) => {
 
     return res.json({ ok: true, url: accountLink.url });
   } catch (err) {
+    console.error('❌ Erro ao vincular conta Stripe:', err);
     return res.status(500).json({ error: getErrorMessage(err) });
   }
 };
 
-// --- 3. VERIFICAR STATUS DA CONTA ---
+// ======================================================
+// 3. VERIFICAR STATUS DA CONTA
+// ======================================================
+
 exports.verificarStatusStripe = async (req, res) => {
   try {
     const { email } = req.query;
-    const result = await db.query('SELECT stripe_account_id FROM public.produtores WHERE email = $1 LIMIT 1', [email]);
+
+    if (!email) {
+      return res.status(400).json({ error: 'E-mail não informado.' });
+    }
+
+    const result = await db.query(
+      'SELECT stripe_account_id FROM public.produtores WHERE email = $1 LIMIT 1',
+      [email]
+    );
+
     const stripeAccountId = result.rows[0]?.stripe_account_id;
 
-    if (!stripeAccountId) return res.json({ conectado: false });
+    if (!stripeAccountId) {
+      return res.json({ conectado: false });
+    }
 
     const account = await stripe.accounts.retrieve(stripeAccountId);
     const temPendencias = account?.requirements?.currently_due?.length > 0;
@@ -209,17 +444,27 @@ exports.verificarStatusStripe = async (req, res) => {
       business_name: account.settings?.dashboard?.display_name || 'Conta Vinculada',
     });
   } catch (err) {
+    console.error('❌ Erro ao verificar status Stripe:', err);
     return res.status(500).json({ error: getErrorMessage(err) });
   }
 };
 
-// --- 4. WEBHOOK ---
+// ======================================================
+// 4. WEBHOOK
+// ======================================================
+
 exports.webhookStripe = async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
+
   try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
   } catch (err) {
+    console.error('❌ Erro na validação do webhook:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
@@ -229,25 +474,25 @@ exports.webhookStripe = async (req, res) => {
 
     try {
       const idEvento = safeInt(meta.eventoId, 0);
-      
-      // Insere compra se não existir
+      const quantidadeComprada = safeInt(meta.quantidade, 1);
+      const valorTotal = safeNumber(session.amount_total, 0) / 100;
+
       await db.query(
-        `INSERT INTO public.compras 
-        (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
-        VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7)
-        ON CONFLICT (stripe_session_id) DO NOTHING`,
+        `INSERT INTO public.compras
+          (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
+         VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7)
+         ON CONFLICT (stripe_session_id) DO NOTHING`,
         [
           safeString(meta.usuarioEmail),
           idEvento,
           safeString(meta.tituloEvento, 'Evento'),
           new Date(),
-          safeInt(meta.quantidade, 1),
-          safeNumber(session.amount_total, 0) / 100,
+          quantidadeComprada,
+          valorTotal,
           session.id,
         ]
       );
 
-      // Envia E-mail
       await enviarIngressoEmail(safeString(meta.usuarioEmail), {
         tituloEvento: safeString(meta.tituloEvento, 'Evento'),
         quantidade: safeString(meta.quantidade, '1'),
@@ -255,57 +500,90 @@ exports.webhookStripe = async (req, res) => {
         dataEvento: safeString(meta.dataEvento, 'A confirmar'),
         horaEvento: safeString(meta.horaEvento, 'A confirmar'),
         localEvento: safeString(meta.localEvento, 'Local a definir'),
-        tipo: 'presencial'
+        tipo: safeString(meta.tipoEvento, 'presencial'),
       });
     } catch (err) {
       console.error('❌ Erro Processamento Webhook:', err);
     }
   }
-  res.json({ received: true });
+
+  return res.json({ received: true });
 };
 
-// --- 5. BUSCAR DETALHES ---
+// ======================================================
+// 5. BUSCAR DETALHES
+// ======================================================
+
 exports.buscarDetalhesCompra = async (req, res) => {
   try {
     const { sessionId } = req.params;
+
+    if (!sessionId) {
+      return res.status(400).json({ error: 'sessionId não informado.' });
+    }
+
     const result = await db.query(
-      `SELECT c.*, e.hora_inicio as hora_evento, e.local_nome as local_evento, e.link_reuniao, e.tipo
-        FROM public.compras c
-        LEFT JOIN public.eventos e ON e.id = c.evento_id
-        WHERE c.stripe_session_id = $1`,
+      `SELECT 
+        c.*,
+        e.hora_inicio AS hora_evento,
+        e.local_nome AS local_evento,
+        e.link_reuniao,
+        e.tipo
+      FROM public.compras c
+      LEFT JOIN public.eventos e ON e.id = c.evento_id
+      WHERE c.stripe_session_id = $1`,
       [sessionId]
     );
 
-    if (result.rows.length > 0) return res.json(result.rows[0]);
+    if (result.rows.length > 0) {
+      return res.json(result.rows[0]);
+    }
 
     const session = await stripe.checkout.sessions.retrieve(sessionId);
+
     if (session.payment_status === 'paid') {
       return res.json({
-        usuario_email: session.metadata.usuarioEmail,
-        evento_nome: session.metadata.tituloEvento,
-        valor_total: session.amount_total / 100,
-        status: 'Aprovado'
+        usuario_email: session.metadata?.usuarioEmail,
+        evento_nome: session.metadata?.tituloEvento,
+        valor_total: safeNumber(session.amount_total, 0) / 100,
+        status: 'Aprovado',
       });
     }
+
     return res.status(404).json({ error: 'Compra não encontrada.' });
   } catch (err) {
+    console.error('❌ Erro ao buscar detalhes da compra:', err);
     return res.status(500).json({ error: getErrorMessage(err) });
   }
 };
 
-// --- 6. LISTAR MEUS INGRESSOS ---
+// ======================================================
+// 6. LISTAR MEUS INGRESSOS
+// ======================================================
+
 exports.listarMeusIngressos = async (req, res) => {
   try {
     const { email } = req.query;
+
+    if (!email) {
+      return res.status(400).json({ error: 'E-mail não informado.' });
+    }
+
     const result = await db.query(
-      `SELECT c.*, e.link_reuniao, TO_CHAR(c.data_evento, 'DD/MM/YYYY') as data 
-        FROM public.compras c 
-        LEFT JOIN public.eventos e ON e.id = c.evento_id
-        WHERE c.usuario_email = $1 ORDER BY c.id DESC`,
+      `SELECT 
+        c.*,
+        e.link_reuniao,
+        TO_CHAR(c.data_evento, 'DD/MM/YYYY') AS data
+      FROM public.compras c
+      LEFT JOIN public.eventos e ON e.id = c.evento_id
+      WHERE c.usuario_email = $1
+      ORDER BY c.id DESC`,
       [email]
     );
+
     return res.json(result.rows);
   } catch (err) {
+    console.error('❌ Erro ao listar ingressos:', err);
     return res.status(500).json({ error: 'Erro ao buscar ingressos.' });
   }
 };
