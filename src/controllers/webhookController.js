@@ -1,7 +1,3 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const db = require('../config/database'); 
-const { enviarIngressoEmail } = require('../services/emailService');
-
 exports.ouvirStripe = async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
@@ -19,12 +15,15 @@ exports.ouvirStripe = async (req, res) => {
 
     if (event.type === 'checkout.session.completed') {
         const session = event.data.object;
-        const { usuarioEmail, eventoId, quantidade } = session.metadata;
+        
+        // CAPTURANDO O AFILIADO DO METADATA (Vindo do checkout)
+        const { usuarioEmail, eventoId, quantidade, afiliadoId } = session.metadata;
 
         const idEventoNumerico = parseInt(eventoId);
         const qtdNumerica = parseInt(quantidade);
+        const valorTotal = session.amount_total / 100;
 
-        console.log(`✅ Pagamento aprovado: ${usuarioEmail} | Evento: ${idEventoNumerico}`);
+        console.log(`✅ Pagamento aprovado: ${usuarioEmail} | Evento: ${idEventoNumerico} | Afiliado: ${afiliadoId || 'Nenhum'}`);
         
         try {
             // 1. Registrar a compra (IDEMPOTÊNCIA)
@@ -34,9 +33,17 @@ exports.ouvirStripe = async (req, res) => {
             );
 
             if (compraCheck.rows.length === 0) {
+                // LÓGICA DE CÁLCULO DE COMISSÃO
+                let valorComissao = 0;
+                if (afiliadoId) {
+                    // Exemplo: 10% fixo. No futuro você pode buscar a taxa real do banco aqui.
+                    valorComissao = valorTotal * 0.10; 
+                }
+
                 const queryCompra = `
-                    INSERT INTO public.compras (usuario_email, evento_id, quantidade, status, stripe_session_id, valor_total)
-                    VALUES ($1, $2, $3, $4, $5, $6)
+                    INSERT INTO public.compras 
+                    (usuario_email, evento_id, quantidade, status, stripe_session_id, valor_total, afiliado_id, valor_comissao)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 `;
 
                 await db.query(queryCompra, [
@@ -45,13 +52,14 @@ exports.ouvirStripe = async (req, res) => {
                     qtdNumerica,
                     'Aprovado', 
                     session.id,
-                    session.amount_total / 100
+                    valorTotal,
+                    afiliadoId || null, // Novo campo
+                    valorComissao      // Novo campo
                 ]);
-                console.log('💾 Registro de compra salvo no banco.');
+                console.log(`💾 Registro de compra salvo. Comissão de R$${valorComissao} para o afiliado.`);
             }
 
-            // 2. Buscar dados do Evento
-            // O código abaixo só vai funcionar se você rodar o ALTER TABLE do passo 1
+            // 2. Buscar dados do Evento (para o e-mail)
             const queryEvento = `
                 SELECT nome, data_inicio, hora_inicio, local_nome, tipo, link_reuniao 
                 FROM public.eventos 
@@ -65,9 +73,9 @@ exports.ouvirStripe = async (req, res) => {
                 return res.json({ received: true }); 
             }
 
-            // 3. Disparar E-mail (Envolvido em try/catch para não quebrar o resto)
+            // 3. Disparar E-mail
             try {
-                const baseUrl = process.env.FRONTEND_URL || 'https://linkah-frontend-ivory.vercel.app';
+                const baseUrl = process.env.FRONTEND_URL || 'https://linkah.eu';
                 const linkIngresso = `${baseUrl}/pagamento/sucesso?session_id=${session.id}`;
                 
                 const dadosParaEmail = {
@@ -83,11 +91,10 @@ exports.ouvirStripe = async (req, res) => {
                     tipo: evento.tipo
                 };
 
-                console.log(`📧 Disparando e-mail para ${usuarioEmail}...`);
                 await enviarIngressoEmail(usuarioEmail, dadosParaEmail);
                 console.log('✨ E-mail enviado!');
             } catch (emailErr) {
-                console.error('❌ Erro ao enviar e-mail, mas a compra foi salva:', emailErr.message);
+                console.error('❌ Erro ao enviar e-mail:', emailErr.message);
             }
 
         } catch (error) {
