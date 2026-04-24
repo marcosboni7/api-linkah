@@ -2,6 +2,7 @@ exports.ouvirStripe = async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
 
+    // 1. Validação do Webhook
     try {
         event = stripe.webhooks.constructEvent(
             req.body, 
@@ -13,10 +14,14 @@ exports.ouvirStripe = async (req, res) => {
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
+    // 2. Processamento do Evento
     if (event.type === 'checkout.session.completed') {
         const session = event.data.object;
         
-        // CAPTURANDO O AFILIADO DO METADATA (Vindo do checkout)
+        // DEBUG: Ver o que chegou do Stripe
+        console.log('🔍 [DEBUG] Sessão recebida do Stripe:', session.id);
+        console.log('🔍 [DEBUG] Metadata extraído:', session.metadata);
+
         const { usuarioEmail, eventoId, quantidade, afiliadoId } = session.metadata;
 
         const idEventoNumerico = parseInt(eventoId);
@@ -26,7 +31,7 @@ exports.ouvirStripe = async (req, res) => {
         console.log(`✅ Pagamento aprovado: ${usuarioEmail} | Evento: ${idEventoNumerico} | Afiliado: ${afiliadoId || 'Nenhum'}`);
         
         try {
-            // 1. Registrar a compra (IDEMPOTÊNCIA)
+            // 3. Registrar a compra (IDEMPOTÊNCIA)
             const compraCheck = await db.query(
                 "SELECT id FROM public.compras WHERE stripe_session_id = $1", 
                 [session.id]
@@ -35,9 +40,12 @@ exports.ouvirStripe = async (req, res) => {
             if (compraCheck.rows.length === 0) {
                 // LÓGICA DE CÁLCULO DE COMISSÃO
                 let valorComissao = 0;
-                if (afiliadoId) {
-                    // Exemplo: 10% fixo. No futuro você pode buscar a taxa real do banco aqui.
+                if (afiliadoId && afiliadoId !== '') {
+                    // Cálculo de 10% de comissão
                     valorComissao = valorTotal * 0.10; 
+                    console.log(`💰 [AFILIADO] Identificado: ${afiliadoId}. Comissão calculada: R$${valorComissao}`);
+                } else {
+                    console.log('ℹ️ [AFILIADO] Ninguém para comissionar nesta venda.');
                 }
 
                 const queryCompra = `
@@ -53,13 +61,16 @@ exports.ouvirStripe = async (req, res) => {
                     'Aprovado', 
                     session.id,
                     valorTotal,
-                    afiliadoId || null, // Novo campo
-                    valorComissao      // Novo campo
+                    afiliadoId || null,
+                    valorComissao
                 ]);
-                console.log(`💾 Registro de compra salvo. Comissão de R$${valorComissao} para o afiliado.`);
+                
+                console.log(`💾 [BANCO] Registro de compra salvo com sucesso! (Sessão: ${session.id})`);
+            } else {
+                console.log(`⚠️ [AVISO] Esta compra já foi registrada anteriormente. (Sessão: ${session.id})`);
             }
 
-            // 2. Buscar dados do Evento (para o e-mail)
+            // 4. Buscar dados do Evento (para o e-mail)
             const queryEvento = `
                 SELECT nome, data_inicio, hora_inicio, local_nome, tipo, link_reuniao 
                 FROM public.eventos 
@@ -69,11 +80,11 @@ exports.ouvirStripe = async (req, res) => {
             const evento = eventoRes.rows[0];
 
             if (!evento) {
-                console.error(`❌ Evento ID ${idEventoNumerico} não encontrado.`);
+                console.error(`❌ [ERRO] Evento ID ${idEventoNumerico} não encontrado no banco.`);
                 return res.json({ received: true }); 
             }
 
-            // 3. Disparar E-mail
+            // 5. Disparar E-mail
             try {
                 const baseUrl = process.env.FRONTEND_URL || 'https://linkah.eu';
                 const linkIngresso = `${baseUrl}/pagamento/sucesso?session_id=${session.id}`;
@@ -91,16 +102,19 @@ exports.ouvirStripe = async (req, res) => {
                     tipo: evento.tipo
                 };
 
+                console.log(`📧 [EMAIL] Enviando para: ${usuarioEmail}...`);
                 await enviarIngressoEmail(usuarioEmail, dadosParaEmail);
-                console.log('✨ E-mail enviado!');
+                console.log('✨ [EMAIL] Enviado e finalizado!');
             } catch (emailErr) {
-                console.error('❌ Erro ao enviar e-mail:', emailErr.message);
+                console.error('❌ [ERRO EMAIL] Falha ao enviar, mas a compra está salva:', emailErr.message);
             }
 
         } catch (error) {
-            console.error('❌ Erro no processamento do Webhook:', error.message);
+            console.error('❌ [ERRO CRÍTICO WEBHOOK]:', error.message);
+            // Aqui você pode adicionar um sistema de alerta (ex: Sentry ou Slack)
         }
     }
 
+    // O Stripe precisa desse JSON para saber que você recebeu o aviso
     res.json({ received: true });
 };
