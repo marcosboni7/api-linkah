@@ -95,7 +95,8 @@ exports.criarSessaoCheckout = async (req, res) => {
       return res.status(500).json({ error: 'STRIPE_SECRET_KEY não configurada.' });
     }
 
-    const { evento, usuarioEmail, usuarioNome, quantidade, quantidades } = req.body;
+    // ADICIONADO: afiliadoId e comissaoPercentual vindos do req.body
+    const { evento, usuarioEmail, usuarioNome, quantidade, quantidades, afiliadoId, comissaoPercentual } = req.body;
     const baseUrl = FRONTEND_URL;
 
     if (!isValidHttpUrl(baseUrl)) {
@@ -295,6 +296,9 @@ exports.criarSessaoCheckout = async (req, res) => {
         itensResumo: safeString(descricaoItens.join(' | ')),
         valorTotal: safeString(totalFinal),
         ingressosJson: JSON.stringify(metadataIngressos).slice(0, 490),
+        // ADICIONADO: Persistência de afiliados no Stripe Metadata
+        afiliadoId: safeString(afiliadoId),
+        comissaoPercentual: safeString(comissaoPercentual || '10'),
       },
       success_url: `${baseUrl}/pagamento/sucesso?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${baseUrl}/venda?eventoId=${ev.id}`,
@@ -320,17 +324,6 @@ exports.criarSessaoCheckout = async (req, res) => {
         `✅ Checkout padrão | Evento: ${ev.id} | Total: ${moedaFinal.toUpperCase()} ${totalFinal}`
       );
     }
-
-    console.log('🧾 Checkout payload recebido:', {
-      eventoId: evento?.id,
-      usuarioEmail,
-      usuarioNome,
-      quantidade,
-      quantidadesSelecionadas,
-      totalFinal,
-      quantidadeFinal,
-      moedaFinal,
-    });
 
     const session = await stripe.checkout.sessions.create(sessionParams);
 
@@ -450,7 +443,7 @@ exports.verificarStatusStripe = async (req, res) => {
 };
 
 // ======================================================
-// 4. WEBHOOK
+// 4. WEBHOOK (ATUALIZADO COM CÁLCULO DE AFILIADOS)
 // ======================================================
 
 exports.webhookStripe = async (req, res) => {
@@ -476,12 +469,22 @@ exports.webhookStripe = async (req, res) => {
       const idEvento = safeInt(meta.eventoId, 0);
       const quantidadeComprada = safeInt(meta.quantidade, 1);
       const valorTotal = safeNumber(session.amount_total, 0) / 100;
+      
+      // LÓGICA DE AFILIADO DINÂMICA
+      const afiliadoId = meta.afiliadoId || null;
+      const pctTaxa = safeNumber(meta.comissaoPercentual, 10); // Fallback para 10 se não vier
+      
+      let valorComissao = 0;
+      if (afiliadoId && afiliadoId.trim() !== "") {
+          valorComissao = valorTotal * (pctTaxa / 100);
+          console.log(`💰 Comissão Afiliado (${afiliadoId}): R$ ${valorComissao.toFixed(2)} (${pctTaxa}%)`);
+      }
 
       await db.query(
         `INSERT INTO public.compras
-          (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id)
-         VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7)
-         ON CONFLICT (stripe_session_id) DO NOTHING`,
+          (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id, afiliado_id, valor_comissao)
+          VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7, $8, $9)
+          ON CONFLICT (stripe_session_id) DO NOTHING`,
         [
           safeString(meta.usuarioEmail),
           idEvento,
@@ -490,6 +493,8 @@ exports.webhookStripe = async (req, res) => {
           quantidadeComprada,
           valorTotal,
           session.id,
+          afiliadoId,
+          valorComissao
         ]
       );
 
