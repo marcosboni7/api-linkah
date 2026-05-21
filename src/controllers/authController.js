@@ -33,6 +33,67 @@ function getErrorMessage(err) {
   return 'Erro desconhecido';
 }
 
+// ------------------------------------------------------
+// 🛠️ SINCRONIZAÇÃO AUTOMÁTICA DAS TABELAS (GARANTIA DO BANCO NOVO)
+// ------------------------------------------------------
+async function inicializarTabelasAutenticacao() {
+  try {
+    // Cria a tabela de produtores caso ela não exista no banco novo
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS public.produtores (
+        id SERIAL PRIMARY KEY,
+        nome VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        senha VARCHAR(255) NOT NULL,
+        cpf_cnpj VARCHAR(50),
+        telefone VARCHAR(50),
+        tipo VARCHAR(10) DEFAULT 'PF',
+        data_nascimento VARCHAR(50),
+        cep VARCHAR(20),
+        rua VARCHAR(255),
+        numero VARCHAR(50),
+        bairro VARCHAR(255),
+        estado VARCHAR(10),
+        razao_social VARCHAR(255),
+        status VARCHAR(50) DEFAULT 'Ativo',
+        role VARCHAR(50) DEFAULT 'produtor',
+        avatar TEXT,
+        bio TEXT,
+        instagram VARCHAR(255),
+        linkedin VARCHAR(255),
+        stripe_account_id VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Cria a tabela de usuarios caso ela não exista no banco novo
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS public.usuarios (
+        id SERIAL PRIMARY KEY,
+        nome VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        senha VARCHAR(255) NOT NULL,
+        telefone VARCHAR(50),
+        status VARCHAR(50) DEFAULT 'Ativo',
+        role VARCHAR(50) DEFAULT 'user',
+        avatar TEXT,
+        bio TEXT,
+        instagram VARCHAR(255),
+        linkedin VARCHAR(255),
+        stripe_account_id VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('✅ [BANCO] Tabelas public.produtores e public.usuarios prontas para uso!');
+  } catch (err) {
+    console.error('❌ [BANCO] Erro ao criar a estrutura de autenticação:', err);
+  }
+}
+
+// Executa a verificação na inicialização do arquivo
+inicializarTabelasAutenticacao();
+
+
 // -----------------------------
 // 1️⃣ REGISTRO DE PRODUTOR
 // -----------------------------
@@ -369,7 +430,7 @@ exports.updatePerfil = async (req, res) => {
     delete user.senha;
 
     return res.status(200).json({
-      message: 'Perfil atualizado com sucesso!',
+      message: 'Perfil updated com sucesso!',
       user
     });
 
