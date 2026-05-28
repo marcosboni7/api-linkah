@@ -1,28 +1,69 @@
 const express = require('express');
 const router = express.Router();
+
 const pagamentoController = require('../controllers/pagamentoController');
 
-// --- 1. CONFIGURAÇÃO DO PRODUTOR (STRIPE CONNECT) ---
-// Inicia o processo de criação de conta Express
-router.post('/conectar-stripe', pagamentoController.vincularContaStripe);
+// ======================================================
+// 1. CONFIGURAÇÃO STRIPE CONNECT
+// ======================================================
 
-// Verifica se o produtor já completou o onboarding e está ativo
-router.get('/status-stripe', pagamentoController.verificarStatusStripe);
+// Conectar conta Stripe Express
+router.post(
+  '/conectar-stripe',
+  pagamentoController.vincularContaStripe
+);
 
-// --- 2. CHECKOUT E COMPRA ---
-// Inicia sessão de pagamento (Cartão + Pix liberados agora)
-router.post('/checkout', pagamentoController.criarSessaoCheckout);
+// Verificar status da conta Stripe
+router.get(
+  '/status-stripe',
+  pagamentoController.verificarStatusStripe
+);
 
-// --- 3. WEBHOOK ---
-// O Stripe avisa o seu servidor aqui sobre pagamentos e atualizações de conta
-// IMPORTANTE: No server.js, esta rota deve usar express.raw()
-router.post('/webhook', pagamentoController.webhookStripe);
+// ======================================================
+// 2. CHECKOUT / PAGAMENTO
+// ======================================================
 
-// --- 4. CONSULTAS ---
-// Detalhes da compra para a página de sucesso (pós-checkout)
-router.get('/detalhes/:sessionId', pagamentoController.buscarDetalhesCompra);
+// Criar sessão Stripe Checkout
+router.post(
+  '/checkout',
+  pagamentoController.criarSessaoCheckout
+);
 
-// Lista ingressos comprados pelo usuário (modal Navbar/Perfil)
-router.get('/meus-ingressos', pagamentoController.listarMeusIngressos);
+// ======================================================
+// 3. WEBHOOK STRIPE
+// ======================================================
+
+// IMPORTANTE:
+// No server.js essa rota precisa usar express.raw()
+router.post(
+  '/webhook',
+  pagamentoController.webhookStripe
+);
+
+// ======================================================
+// 4. CONSULTAS DE COMPRA
+// ======================================================
+
+// Buscar detalhes da compra
+router.get(
+  '/detalhes/:sessionId',
+  pagamentoController.buscarDetalhesCompra
+);
+
+// Listar ingressos do usuário
+router.get(
+  '/meus-ingressos',
+  pagamentoController.listarMeusIngressos
+);
+
+// ======================================================
+// 5. PARTICIPANTES DO EVENTO
+// ======================================================
+
+// LISTAR PARTICIPANTES / CRACHÁS
+router.get(
+  '/compras-evento/:idEvento',
+  pagamentoController.buscarComprasPorEvento
+);
 
 module.exports = router;
