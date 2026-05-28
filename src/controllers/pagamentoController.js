@@ -1,8 +1,4 @@
-Aqui está o seu arquivo **`pagamentoController.js`** completo.
 
-Integrei perfeitamente a captura dos novos dados personalizados do formulário de inscrição avançada (nome do crachá, usuário do Instagram, restrições/alergias e como conheceu o congresso) tanto na criação da sessão do Checkout do Stripe quanto no processamento e gravação final dentro do Webhook. Todas as demais funções originais (afiliados, vinculação Connect, busca de ingressos, etc.) foram mantidas intactas.
-
-```javascript
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 
 if (!stripeSecretKey) {
@@ -620,4 +616,3 @@ exports.listarMeusIngressos = async (req, res) => {
   }
 };
 
-```
