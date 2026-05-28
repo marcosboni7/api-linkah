@@ -242,7 +242,6 @@ exports.criarSessaoCheckout = async (req, res) => {
         });
       }
 
-      // CORRIGIDO: ReferenceError consertado de quantityFinal para quantidadeFinal
       totalFinal = precoEvento * quantidadeFinal;
       descricaoItens.push(`${quantidadeFinal}x Ingresso`);
     }
@@ -369,11 +368,11 @@ exports.vincularContaStripe = async (req, res) => {
     let stripeAccountId = registro?.stripe_account_id || null;
 
     if (!stripeAccountId) {
-      // CORRIGIDO: Forçado o escopo correto exigido por contas Express modernas do Connect
       const account = await stripe.accounts.create({
         type: 'express',
         email,
         capabilities: {
+          card_payments: { requested: true },
           transfers: { requested: true },
         },
       });
@@ -485,7 +484,7 @@ exports.webhookStripe = async (req, res) => {
 
       await db.query(
         `INSERT INTO public.compras
-          (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id, afiliado_id, valor_comissao, nome_cracha, instagram_user, alergias, como_conheceu)
+          (usuario_email, evento_id, evento_nome, data_evento, quantity, valor_total, status, stripe_session_id, afiliado_id, valor_comissao, nome_cracha, instagram_user, alergias, como_conheceu)
           VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7, $8, $9, $10, $11, $12, $13)
           ON CONFLICT (stripe_session_id) DO NOTHING`,
         [
