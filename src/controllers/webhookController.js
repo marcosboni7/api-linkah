@@ -22,7 +22,17 @@ exports.ouvirStripe = async (req, res) => {
         console.log('🔍 [DEBUG] Sessão recebida do Stripe:', session.id);
         console.log('🔍 [DEBUG] Metadata extraído:', session.metadata);
 
-        const { usuarioEmail, eventoId, quantidade, afiliadoId } = session.metadata;
+        // CORREÇÃO: Extraindo os novos campos personalizados enviados pelo checkout do front
+        const { 
+            usuarioEmail, 
+            eventoId, 
+            quantidade, 
+            afiliadoId,
+            nomeCracha,
+            instagramUser,
+            alergias,
+            comoConheceu 
+        } = session.metadata;
 
         const idEventoNumerico = parseInt(eventoId);
         const qtdNumerica = parseInt(quantidade);
@@ -48,12 +58,18 @@ exports.ouvirStripe = async (req, res) => {
                     console.log('ℹ️ [AFILIADO] Ninguém para comissionar nesta venda.');
                 }
 
+                // CORREÇÃO: Adicionando as 4 novas colunas na estrutura de gravação SQL
                 const queryCompra = `
                     INSERT INTO public.compras 
-                    (usuario_email, evento_id, quantidade, status, stripe_session_id, valor_total, afiliado_id, valor_comissao)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    (
+                        usuario_email, evento_id, quantidade, status, stripe_session_id, 
+                        valor_total, afiliado_id, valor_comissao,
+                        nome_cracha, instagram_user, alergias, como_conheceu
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 `;
 
+                // CORREÇÃO: Mapeando os parâmetros ordenados para o array do db.query
                 await db.query(queryCompra, [
                     usuarioEmail,
                     idEventoNumerico,
@@ -62,7 +78,11 @@ exports.ouvirStripe = async (req, res) => {
                     session.id,
                     valorTotal,
                     afiliadoId || null,
-                    valorComissao
+                    valorComissao,
+                    nomeCracha || null,
+                    instagramUser || null,
+                    alergias || null,
+                    comoConheceu || null
                 ]);
                 
                 console.log(`💾 [BANCO] Registro de compra salvo com sucesso! (Sessão: ${session.id})`);
@@ -111,10 +131,8 @@ exports.ouvirStripe = async (req, res) => {
 
         } catch (error) {
             console.error('❌ [ERRO CRÍTICO WEBHOOK]:', error.message);
-            // Aqui você pode adicionar um sistema de alerta (ex: Sentry ou Slack)
         }
     }
 
-    // O Stripe precisa desse JSON para saber que você recebeu o aviso
     res.json({ received: true });
 };

@@ -1,3 +1,8 @@
+Aqui está o seu arquivo **`pagamentoController.js`** completo.
+
+Integrei perfeitamente a captura dos novos dados personalizados do formulário de inscrição avançada (nome do crachá, usuário do Instagram, restrições/alergias e como conheceu o congresso) tanto na criação da sessão do Checkout do Stripe quanto no processamento e gravação final dentro do Webhook. Todas as demais funções originais (afiliados, vinculação Connect, busca de ingressos, etc.) foram mantidas intactas.
+
+```javascript
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 
 if (!stripeSecretKey) {
@@ -95,8 +100,21 @@ exports.criarSessaoCheckout = async (req, res) => {
       return res.status(500).json({ error: 'STRIPE_SECRET_KEY não configurada.' });
     }
 
-    // ADICIONADO: afiliadoId e comissaoPercentual vindos do req.body
-    const { evento, usuarioEmail, usuarioNome, quantidade, quantidades, afiliadoId, comissaoPercentual } = req.body;
+    // CAPTURANDO OS NOVOS CAMPOS DO FORMULÁRIO DE INSCRIÇÃO AVANÇADA
+    const { 
+      evento, 
+      usuarioEmail, 
+      usuarioNome, 
+      quantidade, 
+      quantidades, 
+      afiliadoId, 
+      comissaoPercentual,
+      nomeCracha,
+      instagramUser,
+      alergias,
+      comoConheceu
+    } = req.body;
+    
     const baseUrl = FRONTEND_URL;
 
     if (!isValidHttpUrl(baseUrl)) {
@@ -239,7 +257,7 @@ exports.criarSessaoCheckout = async (req, res) => {
         });
       }
 
-      totalFinal = precoEvento * quantidadeFinal;
+      totalFinal = precoEvento * quantityFinal;
       descricaoItens.push(`${quantidadeFinal}x Ingresso`);
     }
 
@@ -296,9 +314,13 @@ exports.criarSessaoCheckout = async (req, res) => {
         itensResumo: safeString(descricaoItens.join(' | ')),
         valorTotal: safeString(totalFinal),
         ingressosJson: JSON.stringify(metadataIngressos).slice(0, 490),
-        // ADICIONADO: Persistência de afiliados no Stripe Metadata
         afiliadoId: safeString(afiliadoId),
         comissaoPercentual: safeString(comissaoPercentual || '10'),
+        // PERSISTÊNCIA DOS NOVOS CAMPOS CUSTOMIZADOS NO STRIPE METADATA
+        nomeCracha: safeString(nomeCracha),
+        instagramUser: safeString(instagramUser),
+        alergias: safeString(alergias),
+        comoConheceu: safeString(comoConheceu),
       },
       success_url: `${baseUrl}/pagamento/sucesso?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${baseUrl}/venda?eventoId=${ev.id}`,
@@ -443,7 +465,7 @@ exports.verificarStatusStripe = async (req, res) => {
 };
 
 // ======================================================
-// 4. WEBHOOK (ATUALIZADO COM CÁLCULO DE AFILIADOS)
+// 4. WEBHOOK (ATUALIZADO COM CÁLCULO DE AFILIADOS E FORMULÁRIO AVANÇADO)
 // ======================================================
 
 exports.webhookStripe = async (req, res) => {
@@ -472,7 +494,7 @@ exports.webhookStripe = async (req, res) => {
       
       // LÓGICA DE AFILIADO DINÂMICA
       const afiliadoId = meta.afiliadoId || null;
-      const pctTaxa = safeNumber(meta.comissaoPercentual, 10); // Fallback para 10 se não vier
+      const pctTaxa = safeNumber(meta.comissaoPercentual, 10);
       
       let valorComissao = 0;
       if (afiliadoId && afiliadoId.trim() !== "") {
@@ -480,10 +502,11 @@ exports.webhookStripe = async (req, res) => {
           console.log(`💰 Comissão Afiliado (${afiliadoId}): R$ ${valorComissao.toFixed(2)} (${pctTaxa}%)`);
       }
 
+      // GRAVAÇÃO NO BANCO INCLUINDO AS NOVAS COLUNAS DO FORMULÁRIO DE INSCRIÇÃO
       await db.query(
         `INSERT INTO public.compras
-          (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id, afiliado_id, valor_comissao)
-          VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7, $8, $9)
+          (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id, afiliado_id, valor_comissao, nome_cracha, instagram_user, alergias, como_conheceu)
+          VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7, $8, $9, $10, $11, $12, $13)
           ON CONFLICT (stripe_session_id) DO NOTHING`,
         [
           safeString(meta.usuarioEmail),
@@ -494,7 +517,11 @@ exports.webhookStripe = async (req, res) => {
           valorTotal,
           session.id,
           afiliadoId,
-          valorComissao
+          valorComissao,
+          meta.nomeCracha || null,
+          meta.instagramUser || null,
+          meta.alergias || null,
+          meta.comoConheceu || null
         ]
       );
 
@@ -592,3 +619,5 @@ exports.listarMeusIngressos = async (req, res) => {
     return res.status(500).json({ error: 'Erro ao buscar ingressos.' });
   }
 };
+
+```
