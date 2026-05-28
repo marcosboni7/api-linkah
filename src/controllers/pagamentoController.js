@@ -95,20 +95,20 @@ exports.criarSessaoCheckout = async (req, res) => {
       return res.status(500).json({ error: 'STRIPE_SECRET_KEY não configurada.' });
     }
 
-    const { 
-      evento, 
-      usuarioEmail, 
-      usuarioNome, 
-      quantidade, 
-      quantidades, 
-      afiliadoId, 
+    const {
+      evento,
+      usuarioEmail,
+      usuarioNome,
+      quantidade,
+      quantidades,
+      afiliadoId,
       comissaoPercentual,
       nomeCracha,
       instagramUser,
       alergias,
       comoConheceu
     } = req.body;
-    
+
     const baseUrl = FRONTEND_URL;
 
     if (!isValidHttpUrl(baseUrl)) {
@@ -125,7 +125,6 @@ exports.criarSessaoCheckout = async (req, res) => {
 
     const quantidadesSelecionadas = parseQuantidades(quantidades);
 
-    // Busca dados do evento
     const dadosEventoBD = await db.query(
       `SELECT 
         e.id,
@@ -153,7 +152,6 @@ exports.criarSessaoCheckout = async (req, res) => {
 
     const ev = dadosEventoBD.rows[0];
 
-    // Busca ingressos do evento
     const ingressosBD = await db.query(
       `SELECT 
         id,
@@ -176,7 +174,6 @@ exports.criarSessaoCheckout = async (req, res) => {
     let descricaoItens = [];
     let metadataIngressos = [];
 
-    // CENÁRIO 1: evento com ingressos e usuário selecionou ingressos
     if (eventoTemIngressos && existeSelecaoDeIngressos) {
       const mapaIngressos = new Map();
 
@@ -187,16 +184,12 @@ exports.criarSessaoCheckout = async (req, res) => {
       for (const [ingressoId, qtd] of Object.entries(quantidadesSelecionadas)) {
         const ingresso = mapaIngressos.get(String(ingressoId));
 
-        if (!ingresso) {
-          continue;
-        }
+        if (!ingresso) continue;
 
         const precoUnitario = safeNumber(ingresso.preco, 0);
         const moedaIngresso = normalizeCurrency(ingresso.moeda || ev.moeda || 'BRL');
 
-        if (precoUnitario <= 0) {
-          continue;
-        }
+        if (precoUnitario <= 0) continue;
 
         if (quantidadeFinal === 0) {
           moedaFinal = moedaIngresso;
@@ -225,7 +218,6 @@ exports.criarSessaoCheckout = async (req, res) => {
         });
       }
     } else {
-      // CENÁRIO 2: fallback para evento simples sem tabela de ingressos
       const precoEvento = safeNumber(ev.preco, 0);
       quantidadeFinal = safeInt(quantidade, 1);
       moedaFinal = normalizeCurrency(ev.moeda || evento?.moeda || 'BRL');
@@ -472,19 +464,19 @@ exports.webhookStripe = async (req, res) => {
       const idEvento = safeInt(meta.eventoId, 0);
       const quantidadeComprada = safeInt(meta.quantidade, 1);
       const valorTotal = safeNumber(session.amount_total, 0) / 100;
-      
+
       const afiliadoId = meta.afiliadoId || null;
       const pctTaxa = safeNumber(meta.comissaoPercentual, 10);
-      
+
       let valorComissao = 0;
-      if (afiliadoId && afiliadoId.trim() !== "") {
-          valorComissao = valorTotal * (pctTaxa / 100);
-          console.log(`💰 Comissão Afiliado (${afiliadoId}): R$ ${valorComissao.toFixed(2)} (${pctTaxa}%)`);
+      if (afiliadoId && afiliadoId.trim() !== '') {
+        valorComissao = valorTotal * (pctTaxa / 100);
+        console.log(`💰 Comissão Afiliado (${afiliadoId}): R$ ${valorComissao.toFixed(2)} (${pctTaxa}%)`);
       }
 
       await db.query(
         `INSERT INTO public.compras
-          (usuario_email, evento_id, evento_nome, data_evento, quantity, valor_total, status, stripe_session_id, afiliado_id, valor_comissao, nome_cracha, instagram_user, alergias, como_conheceu)
+          (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id, afiliado_id, valor_comissao, nome_cracha, instagram_user, alergias, como_conheceu)
           VALUES ($1, $2, $3, $4, $5, $6, 'Aprovado', $7, $8, $9, $10, $11, $12, $13)
           ON CONFLICT (stripe_session_id) DO NOTHING`,
         [
@@ -599,9 +591,6 @@ exports.listarMeusIngressos = async (req, res) => {
   }
 };
 
-// ======================================================
-// 7. LISTAR COMPRAS DO EVENTO (PARA O MODAL DO ORGANIZADOR)
-// ======================================================
 
 exports.buscarComprasPorEvento = async (req, res) => {
   try {
@@ -620,7 +609,7 @@ exports.buscarComprasPorEvento = async (req, res) => {
         como_conheceu,
         status
       FROM public.compras
-      WHERE evento_id = $1 AND status = 'Aprovado'
+      WHERE evento_id = $1
       ORDER BY id DESC`,
       [safeInt(idEvento, 0)]
     );
