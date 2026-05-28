@@ -1,4 +1,3 @@
-
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 
 if (!stripeSecretKey) {
@@ -96,7 +95,6 @@ exports.criarSessaoCheckout = async (req, res) => {
       return res.status(500).json({ error: 'STRIPE_SECRET_KEY não configurada.' });
     }
 
-    // CAPTURANDO OS NOVOS CAMPOS DO FORMULÁRIO DE INSCRIÇÃO AVANÇADA
     const { 
       evento, 
       usuarioEmail, 
@@ -127,9 +125,7 @@ exports.criarSessaoCheckout = async (req, res) => {
 
     const quantidadesSelecionadas = parseQuantidades(quantidades);
 
-    // ------------------------------------------------------
     // Busca dados do evento
-    // ------------------------------------------------------
     const dadosEventoBD = await db.query(
       `SELECT 
         e.id,
@@ -157,9 +153,7 @@ exports.criarSessaoCheckout = async (req, res) => {
 
     const ev = dadosEventoBD.rows[0];
 
-    // ------------------------------------------------------
     // Busca ingressos do evento
-    // ------------------------------------------------------
     const ingressosBD = await db.query(
       `SELECT 
         id,
@@ -182,9 +176,7 @@ exports.criarSessaoCheckout = async (req, res) => {
     let descricaoItens = [];
     let metadataIngressos = [];
 
-    // ------------------------------------------------------
     // CENÁRIO 1: evento com ingressos e usuário selecionou ingressos
-    // ------------------------------------------------------
     if (eventoTemIngressos && existeSelecaoDeIngressos) {
       const mapaIngressos = new Map();
 
@@ -206,7 +198,6 @@ exports.criarSessaoCheckout = async (req, res) => {
           continue;
         }
 
-        // Garante moeda única no checkout
         if (quantidadeFinal === 0) {
           moedaFinal = moedaIngresso;
         } else if (moedaIngresso !== moedaFinal) {
@@ -234,9 +225,7 @@ exports.criarSessaoCheckout = async (req, res) => {
         });
       }
     } else {
-      // ------------------------------------------------------
       // CENÁRIO 2: fallback para evento simples sem tabela de ingressos
-      // ------------------------------------------------------
       const precoEvento = safeNumber(ev.preco, 0);
       quantidadeFinal = safeInt(quantidade, 1);
       moedaFinal = normalizeCurrency(ev.moeda || evento?.moeda || 'BRL');
@@ -253,7 +242,8 @@ exports.criarSessaoCheckout = async (req, res) => {
         });
       }
 
-      totalFinal = precoEvento * quantityFinal;
+      // CORRIGIDO: ReferenceError consertado de quantityFinal para quantidadeFinal
+      totalFinal = precoEvento * quantidadeFinal;
       descricaoItens.push(`${quantidadeFinal}x Ingresso`);
     }
 
@@ -312,7 +302,6 @@ exports.criarSessaoCheckout = async (req, res) => {
         ingressosJson: JSON.stringify(metadataIngressos).slice(0, 490),
         afiliadoId: safeString(afiliadoId),
         comissaoPercentual: safeString(comissaoPercentual || '10'),
-        // PERSISTÊNCIA DOS NOVOS CAMPOS CUSTOMIZADOS NO STRIPE METADATA
         nomeCracha: safeString(nomeCracha),
         instagramUser: safeString(instagramUser),
         alergias: safeString(alergias),
@@ -322,9 +311,6 @@ exports.criarSessaoCheckout = async (req, res) => {
       cancel_url: `${baseUrl}/venda?eventoId=${ev.id}`,
     };
 
-    // ------------------------------------------------------
-    // Split Stripe Connect
-    // ------------------------------------------------------
     if (ev.stripe_account_id) {
       const taxaStaff = safeNumber(ev.taxa_plataforma, 0.05);
       const comissaoLinkah = Math.round(totalEmCentavos * taxaStaff);
@@ -383,11 +369,11 @@ exports.vincularContaStripe = async (req, res) => {
     let stripeAccountId = registro?.stripe_account_id || null;
 
     if (!stripeAccountId) {
+      // CORRIGIDO: Forçado o escopo correto exigido por contas Express modernas do Connect
       const account = await stripe.accounts.create({
         type: 'express',
         email,
         capabilities: {
-          card_payments: { requested: true },
           transfers: { requested: true },
         },
       });
@@ -461,7 +447,7 @@ exports.verificarStatusStripe = async (req, res) => {
 };
 
 // ======================================================
-// 4. WEBHOOK (ATUALIZADO COM CÁLCULO DE AFILIADOS E FORMULÁRIO AVANÇADO)
+// 4. WEBHOOK
 // ======================================================
 
 exports.webhookStripe = async (req, res) => {
@@ -488,7 +474,6 @@ exports.webhookStripe = async (req, res) => {
       const quantidadeComprada = safeInt(meta.quantidade, 1);
       const valorTotal = safeNumber(session.amount_total, 0) / 100;
       
-      // LÓGICA DE AFILIADO DINÂMICA
       const afiliadoId = meta.afiliadoId || null;
       const pctTaxa = safeNumber(meta.comissaoPercentual, 10);
       
@@ -498,7 +483,6 @@ exports.webhookStripe = async (req, res) => {
           console.log(`💰 Comissão Afiliado (${afiliadoId}): R$ ${valorComissao.toFixed(2)} (${pctTaxa}%)`);
       }
 
-      // GRAVAÇÃO NO BANCO INCLUINDO AS NOVAS COLUNAS DO FORMULÁRIO DE INSCRIÇÃO
       await db.query(
         `INSERT INTO public.compras
           (usuario_email, evento_id, evento_nome, data_evento, quantidade, valor_total, status, stripe_session_id, afiliado_id, valor_comissao, nome_cracha, instagram_user, alergias, como_conheceu)
@@ -616,3 +600,35 @@ exports.listarMeusIngressos = async (req, res) => {
   }
 };
 
+// ======================================================
+// 7. LISTAR COMPRAS DO EVENTO (PARA O MODAL DO ORGANIZADOR)
+// ======================================================
+
+exports.buscarComprasPorEvento = async (req, res) => {
+  try {
+    const { idEvento } = req.params;
+
+    if (!idEvento) {
+      return res.status(400).json({ error: 'ID do evento não informado.' });
+    }
+
+    const result = await db.query(
+      `SELECT 
+        usuario_email,
+        nome_cracha,
+        instagram_user,
+        alergias,
+        como_conheceu,
+        status
+      FROM public.compras
+      WHERE evento_id = $1 AND status = 'Aprovado'
+      ORDER BY id DESC`,
+      [safeInt(idEvento, 0)]
+    );
+
+    return res.json(result.rows);
+  } catch (err) {
+    console.error('❌ Erro ao buscar participantes do evento:', err);
+    return res.status(500).json({ error: 'Erro interno ao listar participantes.' });
+  }
+};
